@@ -1,16 +1,26 @@
 <#
 .SYNOPSIS
-  Opens, shows and closes iSCSI sessions with several MC/S connections on the Windows initiator,
-  without the iscsicpl dialog.
+  Opens, shows and closes iSCSI sessions over several network links on the Windows initiator, with
+  MC/S (several connections in one session) or MPIO (several sessions), without the iscsicpl
+  dialog.
 
 .DESCRIPTION
-  Uses the Microsoft iSCSI initiator (its WMI interface in root/wmi and the iSCSI cmdlets). Run it
-  in an elevated PowerShell.
+  Uses the Microsoft iSCSI initiator (its WMI interface in root/wmi and the iSCSI cmdlets) and, on
+  Windows Server, MPIO. Run it in an elevated PowerShell.
 
-  -Target and -Portal: without a session to the target it logs in; with one it adds or removes
-  connections until the wanted number is reached, then sets the MCS load balance policy. A new
-  session starts with Round Robin, so the policy is always set explicitly. Without -Connections
-  it opens as many connections as the target allows (max_connections in its YAML).
+  Mode: MPIO exists only on Windows Server, with the feature Multipath-IO installed and iSCSI
+  disks claimed by the Microsoft DSM. -Mode Auto (default) uses MPIO when that is ready and MC/S
+  otherwise. MC/S and MPIO are never mixed for one target; changing the mode needs -Reconnect.
+
+  MC/S: without a session to the target it logs in; with one it adds or removes connections until
+  the wanted number is reached, then sets the MCS load balance policy. A new session starts with
+  Round Robin, so the policy is always set explicitly. Without -Connections it opens as many
+  connections as the target allows (max_connections in its YAML).
+
+  MPIO: it opens one session with one connection per wanted path. Before a second session is
+  opened, every disk of the target must be claimed by MPIO; several sessions to a disk without
+  MPIO look like independent disks and destroy its data. The policy is set per MPIO disk. Without
+  -Connections it opens 16 sessions.
 
   -List: lists the targets of a portal with the maximum number of connections per session. The
   maximum is only known after a login: for a target without a session the script logs in briefly
@@ -31,10 +41,16 @@
   TCP port of the portal. Default 3260.
 
 .PARAMETER Connections
-  Number of connections the session shall have. Default: the maximum the target allows.
+  Number of TCP connections to the target. MC/S: connections of the one session, default the
+  maximum the target allows. MPIO: number of sessions, default 16.
 
 .PARAMETER Policy
-  MCS load balance policy: LeastQueueDepth (default), RoundRobin or FailOverOnly.
+  Load balance policy: LeastQueueDepth (default), RoundRobin or FailOverOnly. MC/S only; with
+  MPIO the script sets LeastQueueDepth, since the Microsoft DSM refused the others for the LUNs of
+  the iSCSIContainer target (they report ALUA).
+
+.PARAMETER Mode
+  Auto (default): MPIO if it is ready on this Windows Server, else MC/S. Mcs or Mpio force one.
 
 .PARAMETER Reconnect
   Log out every session to the target first, then log in again (new source ports, so the
@@ -111,6 +127,10 @@ param(
     [string]$Policy = 'LeastQueueDepth',
 
     [Parameter(ParameterSetName = 'Set')]
+    [ValidateSet('Auto', 'Mcs', 'Mpio')]
+    [string]$Mode = 'Auto',
+
+    [Parameter(ParameterSetName = 'Set')]
     [switch]$Reconnect,
 
     [Parameter(Mandatory, ParameterSetName = 'Show')]
@@ -144,6 +164,9 @@ $ns = 'root/wmi'
 $codes = @{ FailOverOnly = 1; RoundRobin = 2; LeastQueueDepth = 4 }
 $names = @{ 1 = 'Fail Over Only'; 2 = 'Round Robin'; 3 = 'Round Robin with Subset'
     4 = 'Least Queue Depth'; 5 = 'Weighted Paths'; 6 = 'Vendor Specific' }
+# DSM_Load_Balance_Policy_V2.LoadBalancePolicy; the codes 1 to 5 are those of mpclaim -l as well.
+$mpioNames = @{ 1 = 'Fail Over Only'; 2 = 'Round Robin'; 3 = 'Round Robin with Subset'
+    4 = 'Least Queue Depth'; 5 = 'Weighted Paths'; 6 = 'Least Blocks' }
 $anyInitiatorPort = [uint32]::MaxValue
 
 # ISCSI_LOGIN_OPTIONS in iscsidsc.h (Windows SDK)
@@ -253,9 +276,74 @@ function Get-LbEntry($session) {
     $null
 }
 
+# Why MPIO cannot be used here, or $null if it can.
+function Get-MpioProblem {
+    if ((Get-CimInstance Win32_OperatingSystem).ProductType -eq 1) {
+        return 'this is a client Windows; MPIO exists only on Windows Server'
+    }
+    $feature = Get-WindowsFeature -Name Multipath-IO -ErrorAction SilentlyContinue
+    if (-not $feature -or -not $feature.Installed) {
+        return 'the feature Multipath-IO is not installed (Install-WindowsFeature Multipath-IO, then restart)'
+    }
+    $claim = Get-MSDSMAutomaticClaimSettings -ErrorAction SilentlyContinue
+    if (-not $claim -or -not $claim['iSCSI']) {
+        return 'MPIO does not claim iSCSI disks (Enable-MSDSMAutomaticClaim -BusType iSCSI, then restart)'
+    }
+    $null
+}
+
+# Disks of the target, one per LUN.
+function Get-TargetDisks {
+    @(Get-IscsiSession -ErrorAction SilentlyContinue | Where-Object TargetNodeAddress -eq $Target |
+        Get-Disk -ErrorAction SilentlyContinue | Sort-Object Number -Unique)
+}
+
+function Test-MpioDisk($disk) {
+    $disk.Path -like '\\?\mpio#*'
+}
+
+# MPIO_DISK_INFO entry of a disk: Name "MPIO Disk<n>", NumberPaths. The disk's UniqueId is the
+# entry's SerialNumber.
+function Get-MpioEntry($disk) {
+    foreach ($info in @(Get-CimInstance -Namespace $ns -ClassName MPIO_DISK_INFO -ErrorAction SilentlyContinue)) {
+        foreach ($d in @($info.DriveInfo)) {
+            if ($d.SerialNumber -eq $disk.UniqueId) { return $d }
+        }
+    }
+    $null
+}
+
+function Get-MpioNumber($entry) {
+    [int]($entry.Name -replace '\D', '')
+}
+
+# Policy of an MPIO disk from DSM_QueryLBPolicy_V2. Its InstanceName is the disk's MPIO path
+# ("\\?\mpio#disk&...#1&...#{guid}" becomes "MPIO\Disk&...\1&..._0").
+function Get-MpioPolicy($disk) {
+    $parts = $disk.Path.Substring(4) -split '#'
+    $want = ($parts[0..2] -join '\').ToUpperInvariant()
+    foreach ($q in @(Get-CimInstance -Namespace $ns -ClassName DSM_QueryLBPolicy_V2 -ErrorAction SilentlyContinue)) {
+        if (($q.InstanceName -replace '_\d+$', '').ToUpperInvariant() -eq $want) {
+            return $mpioNames[[int]$q.LoadBalancePolicy.LoadBalancePolicy]
+        }
+    }
+    'unknown'
+}
+
 function Show-State {
     $sessions = @(Get-Sessions $Target)
     if (-not $sessions) { Write-Host "No session to $Target."; return }
+    $disks = @(Get-TargetDisks)
+    if (@($disks | Where-Object { Test-MpioDisk $_ })) {
+        Write-Host ('{0}: {1} session(s) with MPIO' -f $Target, $sessions.Count)
+        foreach ($disk in $disks) {
+            $entry = Get-MpioEntry $disk
+            if (-not $entry) { Write-Host "  Disk $($disk.Number): NOT claimed by MPIO"; continue }
+            Write-Host ('  Disk {0} ({1}): {2} path(s), policy {3}' -f $disk.Number, $entry.Name,
+                $entry.NumberPaths, (Get-MpioPolicy $disk))
+        }
+        return
+    }
     foreach ($s in $sessions) {
         $lb = Get-LbEntry $s
         $policy = if ($lb) { $names[[int]$lb.Entry.LoadBalancePolicy] } else { 'unknown' }
@@ -311,6 +399,136 @@ function Show-Targets {
     }
 }
 
+# One login to the target; -IsMultipathEnabled for MPIO, so Windows allows further sessions.
+function Connect-Session([bool]$multipath) {
+    if (-not (Get-IscsiTargetPortal | Where-Object TargetPortalAddress -eq $Portal)) { Add-Portal }
+    $auth = Get-AuthParameters
+    try {
+        Connect-IscsiTarget -NodeAddress $Target -TargetPortalAddress $Portal -TargetPortalPortNumber $Port `
+            -IsMultipathEnabled $multipath -ErrorAction Stop @auth | Out-Null
+    }
+    catch {
+        $hint = if ($chap) { 'Are CHAP user and secret the ones set with "iscsictl chap set"?' }
+                else { 'If the target requires CHAP, give -ChapUser.' }
+        throw "The login to $Target failed ($_). $hint"
+    }
+}
+
+function Set-Mcs {
+    $sessions = @(Get-Sessions $Target)
+    if ($sessions.Count -gt 1) {
+        throw "There are $($sessions.Count) sessions to $Target (MPIO?). Use -Reconnect to log out all of them and start one MC/S session."
+    }
+    if (-not $sessions) {
+        Write-Host "Logging in to $Target at ${Portal}:$Port (MC/S)"
+        Connect-Session $false
+        $sessions = @(Get-Sessions $Target)
+        if ($sessions.Count -ne 1) { throw "Expected one session after the login, found $($sessions.Count)." }
+    }
+    $session = $sessions[0]
+
+    $max = Get-MaxConnections $session
+    $count = $Connections
+    if (-not $script:connectionsGiven) {
+        if (-not $max) { throw 'The maximum number of connections of the session is unknown; give -Connections.' }
+        $count = $max
+    }
+    elseif ($max -and $count -gt $max) {
+        throw "The target allows at most $max connection(s) per session (max_connections in its YAML)."
+    }
+    $have = @($session.ConnectionInformation).Count
+    $portalInfo = New-CimInstance -Namespace $ns -ClassName MSiSCSIInitiator_Portal -ClientOnly -Property @{
+        Address = $Portal; Port = $Port; Index = [uint32]0; SymbolicName = '' }
+    $addArgs = @{ InitiatorPortNumber = $anyInitiatorPort; TargetPortal = $portalInfo; SecurityFlags = [uint64]0 }
+    if ($chap) { $addArgs.LoginOptions = New-LoginOptions }
+    while ($have -lt $count) {
+        try {
+            $r = Invoke-CimMethod -InputObject $session -MethodName AddConnection -Arguments $addArgs
+        }
+        catch {
+            $hint = if ($chap) { '' } else { ' If the target requires CHAP, give -ChapUser.' }
+            throw "Connection $($have + 1) could not be added ($_).$hint"
+        }
+        Assert-Ok $r "AddConnection (connection $($have + 1))"
+        $have++
+    }
+    while ($have -gt $count) {
+        # The connection with the lowest CID leads the session; it is never removed.
+        $session = @(Get-Sessions $Target)[0]
+        $last = @($session.ConnectionInformation) | Sort-Object { Get-Cid $_ } | Select-Object -Last 1
+        $r = Invoke-CimMethod -InputObject $session -MethodName RemoveConnection -Arguments @{
+            UniqueConnectionId = $last.ConnectionID }
+        Assert-Ok $r 'RemoveConnection'
+        $have--
+    }
+
+    $session = @(Get-Sessions $Target)[0]
+    $lb = Get-LbEntry $session
+    if (-not $lb) { throw "No load balance entry for session $($session.SessionId)." }
+    $lb.Entry.LoadBalancePolicy = [uint32]$codes[$Policy]
+    $ops = @(Get-CimInstance -Namespace $ns -ClassName MSiSCSI_LB_Operations |
+        Where-Object InstanceName -eq $lb.Query.InstanceName)
+    if ($ops.Count -ne 1) { throw "No load balance operations for adapter $($lb.Query.InstanceName)." }
+    $r = Invoke-CimMethod -InputObject $ops[0] -MethodName SetLoadBalancePolicy -Arguments @{
+        LoadBalancePolicies = $lb.Entry }
+    Assert-Ok $r 'SetLoadBalancePolicy'
+    if ($r.Status -ne 0) { throw "SetLoadBalancePolicy status $($r.Status)" }
+}
+
+# Waits until the target's disks are there and their number stays the same for two seconds.
+function Wait-TargetDisks {
+    $last = -1
+    $stable = 0
+    for ($i = 0; $i -lt 30; $i++) {
+        $n = @(Get-TargetDisks).Count
+        if ($n -gt 0 -and $n -eq $last) {
+            $stable++
+            if ($stable -ge 2) { return }
+        }
+        else { $stable = 0 }
+        $last = $n
+        Start-Sleep -Seconds 1
+    }
+}
+
+function Set-Mpio {
+    $sessions = @(Get-Sessions $Target)
+    if (@($sessions | Where-Object { @($_.ConnectionInformation).Count -gt 1 })) {
+        throw "The session to $Target has several connections (MC/S). Use -Reconnect to switch to MPIO."
+    }
+    $count = if ($script:connectionsGiven) { $Connections } else { 16 }
+    if (-not $sessions) {
+        Write-Host "Logging in to $Target at ${Portal}:$Port (MPIO)"
+        Connect-Session $true
+    }
+    Wait-TargetDisks
+    $disks = @(Get-TargetDisks)
+    if (-not $disks) { throw "The target exports no disk to this initiator." }
+    foreach ($disk in $disks) {
+        if (-not (Test-MpioDisk $disk)) {
+            throw "Disk $($disk.Number) of $Target is not claimed by MPIO; no further session is opened. Check Get-MSDSMAutomaticClaimSettings."
+        }
+    }
+    while (@(Get-Sessions $Target).Count -lt $count) { Connect-Session $true }
+    while (@(Get-Sessions $Target).Count -gt $count) {
+        $last = @(Get-Sessions $Target) | Sort-Object { Get-IdNumber $_.SessionId } | Select-Object -Last 1
+        Assert-Ok (Invoke-CimMethod -InputObject $last -MethodName Logout) 'Logout'
+    }
+    # Wait until MPIO counts every path, then set the policy per MPIO disk.
+    foreach ($disk in $disks) {
+        for ($i = 0; $i -lt 30; $i++) {
+            $entry = Get-MpioEntry $disk
+            if ($entry -and $entry.NumberPaths -eq $count) { break }
+            Start-Sleep -Seconds 1
+        }
+        if (-not $entry) { throw "Disk $($disk.Number) has no MPIO entry." }
+        $out = mpclaim.exe -l -d (Get-MpioNumber $entry) $codes[$Policy] 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "The policy $Policy could not be set on $($entry.Name): $($out -join ' ')"
+        }
+    }
+}
+
 if ($Show) { Show-State; return }
 if ($List) { Show-Targets; return }
 if ($Disconnect) {
@@ -319,75 +537,19 @@ if ($Disconnect) {
     return
 }
 
-$sessions = @(Get-Sessions $Target)
-if ($sessions.Count -gt 1 -and -not $Reconnect) {
-    throw "There are $($sessions.Count) sessions to $Target. Use -Reconnect to log out all of them and start one."
+$script:connectionsGiven = $PSBoundParameters.ContainsKey('Connections')
+$problem = Get-MpioProblem
+$use = switch ($Mode) {
+    'Mpio' { if ($problem) { throw "MPIO cannot be used: $problem" }; 'Mpio' }
+    'Mcs' { 'Mcs' }
+    default { if ($problem) { 'Mcs' } else { 'Mpio' } }
 }
-if ($Reconnect) {
-    Remove-Sessions $Target
-    $sessions = @()
+if ($Mode -eq 'Auto' -and $problem -and (Get-CimInstance Win32_OperatingSystem).ProductType -ne 1) {
+    Write-Host "Using MC/S: $problem"
 }
-if (-not $sessions) {
-    Write-Host "Logging in to $Target at ${Portal}:$Port"
-    if (-not (Get-IscsiTargetPortal | Where-Object TargetPortalAddress -eq $Portal)) { Add-Portal }
-    $auth = Get-AuthParameters
-    try {
-        Connect-IscsiTarget -NodeAddress $Target -TargetPortalAddress $Portal `
-            -TargetPortalPortNumber $Port -ErrorAction Stop @auth | Out-Null
-    }
-    catch {
-        $hint = if ($chap) { 'Are CHAP user and secret the ones set with "iscsictl chap set"?' }
-                else { 'If the target requires CHAP, give -ChapUser.' }
-        throw "The login to $Target failed ($_). $hint"
-    }
-    $sessions = @(Get-Sessions $Target)
-    if ($sessions.Count -ne 1) { throw "Expected one session after the login, found $($sessions.Count)." }
+if ($use -eq 'Mpio' -and $Policy -ne 'LeastQueueDepth') {
+    throw 'With MPIO only -Policy LeastQueueDepth is supported (the Microsoft DSM refuses the others for ALUA LUNs).'
 }
-$session = $sessions[0]
-
-$max = Get-MaxConnections $session
-if (-not $PSBoundParameters.ContainsKey('Connections')) {
-    if (-not $max) { throw 'The maximum number of connections of the session is unknown; give -Connections.' }
-    $Connections = $max
-}
-elseif ($max -and $Connections -gt $max) {
-    throw "The target allows at most $max connection(s) per session (max_connections in its YAML)."
-}
-$have = @($session.ConnectionInformation).Count
-$portalInfo = New-CimInstance -Namespace $ns -ClassName MSiSCSIInitiator_Portal -ClientOnly -Property @{
-    Address = $Portal; Port = $Port; Index = [uint32]0; SymbolicName = '' }
-$addArgs = @{ InitiatorPortNumber = $anyInitiatorPort; TargetPortal = $portalInfo; SecurityFlags = [uint64]0 }
-if ($chap) { $addArgs.LoginOptions = New-LoginOptions }
-while ($have -lt $Connections) {
-    try {
-        $r = Invoke-CimMethod -InputObject $session -MethodName AddConnection -Arguments $addArgs
-    }
-    catch {
-        $hint = if ($chap) { '' } else { ' If the target requires CHAP, give -ChapUser.' }
-        throw "Connection $($have + 1) could not be added ($_).$hint"
-    }
-    Assert-Ok $r "AddConnection (connection $($have + 1))"
-    $have++
-}
-while ($have -gt $Connections) {
-    # The connection with the lowest CID leads the session; it is never removed.
-    $session = @(Get-Sessions $Target)[0]
-    $last = @($session.ConnectionInformation) | Sort-Object { Get-Cid $_ } | Select-Object -Last 1
-    $r = Invoke-CimMethod -InputObject $session -MethodName RemoveConnection -Arguments @{
-        UniqueConnectionId = $last.ConnectionID }
-    Assert-Ok $r 'RemoveConnection'
-    $have--
-}
-
-$session = @(Get-Sessions $Target)[0]
-$lb = Get-LbEntry $session
-if (-not $lb) { throw "No load balance entry for session $($session.SessionId)." }
-$lb.Entry.LoadBalancePolicy = [uint32]$codes[$Policy]
-$ops = @(Get-CimInstance -Namespace $ns -ClassName MSiSCSI_LB_Operations |
-    Where-Object InstanceName -eq $lb.Query.InstanceName)
-if ($ops.Count -ne 1) { throw "No load balance operations for adapter $($lb.Query.InstanceName)." }
-$r = Invoke-CimMethod -InputObject $ops[0] -MethodName SetLoadBalancePolicy -Arguments @{
-    LoadBalancePolicies = $lb.Entry }
-Assert-Ok $r 'SetLoadBalancePolicy'
-if ($r.Status -ne 0) { throw "SetLoadBalancePolicy status $($r.Status)" }
+if ($Reconnect) { Remove-Sessions $Target }
+if ($use -eq 'Mpio') { Set-Mpio } else { Set-Mcs }
 Show-State

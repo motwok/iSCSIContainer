@@ -94,6 +94,10 @@ prominent warning and, if the YAML asks for MC/S, reports unhealthy.
 A module that is loaded once stays loaded until the next reboot. After the first build on a host on
 which the unpatched module is already loaded, reboot once.
 
+Several sessions with one connection each (MPIO on Windows Server, dm-multipath on Linux) are not
+affected by the bug; they need no `max_connections` and no patched module. The scripts in
+`windows/` and `linux/` set them up (see the README).
+
 On the Windows initiator use the MCS policy "Least Queue Depth" and add connections up to the
 configured number, by hand in `iscsicpl` or with [windows/mcs-session.ps1](../windows/mcs-session.ps1)
 (see the README). With Round Robin every connection carries the same amount, so the slowest link

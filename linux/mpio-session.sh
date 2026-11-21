@@ -268,6 +268,10 @@ show_state() {
     done
 }
 
+map_exists() {
+    multipathd show maps format "%n" 2> /dev/null | awk 'NR > 1' | grep -qx "$1"
+}
+
 # Open count of a device-mapper device (mounted, held by LVM, opened by a program).
 map_open_count() {
     dmsetup info -c --noheadings -o open "$1" 2> /dev/null | tr -d ' '
@@ -295,10 +299,15 @@ disconnect() {
         echo "Logging out session $sid"
         iscsiadm -m session -r "$sid" -u > /dev/null
     done
-    wait_settle
+    # multipathd removes a map once its last path is gone; flush only what is left after that.
     for name in $maps; do
-        if multipathd show maps format "%n" 2> /dev/null | grep -qx "$name"; then
-            multipath -f "$name" > /dev/null 2>&1 || echo "WARNING: /dev/mapper/$name could not be removed" >&2
+        i=0
+        while map_exists "$name" && [ "$i" -lt 15 ]; do
+            i=$((i + 1))
+            sleep 1
+        done
+        if map_exists "$name" && ! multipath -f "$name" > /dev/null 2>&1; then
+            echo "WARNING: /dev/mapper/$name could not be removed" >&2
         fi
     done
 }

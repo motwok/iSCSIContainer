@@ -64,27 +64,46 @@ Run them in the target container, for example `docker exec -it <container> iscsi
 Passwords are applied to the running target at once and are kept on the config volume, not in the
 YAML. As soon as one password is set for a target, every initiator of that target needs one.
 
-## Windows initiator with MC/S
+## Windows initiator with MC/S or MPIO
 
-[windows/mcs-session.ps1](windows/mcs-session.ps1) opens the session with the wanted number of
-connections and sets the MCS policy "Least Queue Depth", instead of adding every connection in the
-`iscsicpl` dialog. Run it in an elevated PowerShell:
+[windows/mcs-session.ps1](windows/mcs-session.ps1) opens the session(s) to a target over several
+links, instead of adding every connection in the `iscsicpl` dialog. Run it in an elevated
+PowerShell:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\mcs-session.ps1 -Target <target-iqn> -Portal <address> -Connections 16
+powershell -ExecutionPolicy Bypass -File .\mcs-session.ps1 -Target <target-iqn> -Portal <address>
 ```
+
+It picks the mode itself (`-Mode Auto`):
+
+- **MPIO** on Windows Server with the feature Multipath-IO installed and iSCSI disks claimed by the
+  Microsoft DSM: one session per connection, 16 by default. A second session is only opened once
+  every disk of the target is an MPIO disk; several sessions to a disk without MPIO destroy its
+  data. Sessions with one connection each never trigger the MC/S teardown bug of the kernel, so
+  MPIO can use several links also on hosts without the patched module.
+- **MC/S** otherwise (client Windows has no MPIO): one session with as many connections as the
+  target allows (`max_connections`).
+
+`-Mode Mcs` or `-Mode Mpio` forces one; the two are never mixed for a target, changing needs
+`-Reconnect`. The policy is "Least Queue Depth" in both modes.
 
 | Call | What it does |
 |---|---|
-| `-Target <iqn> -Portal <address>` | Logs in if needed and opens as many connections as the target allows (`max_connections`), sets "Least Queue Depth" (`-Policy` for another). |
-| `... -Connections <n>` | The same with exactly `n` connections; adds or removes connections as needed. |
+| `-Target <iqn> -Portal <address>` | Logs in if needed and opens the connections, sets "Least Queue Depth". |
+| `... -Connections <n>` | The same with exactly `n` connections (MPIO: sessions); adds or removes as needed. |
 | `... -Reconnect` | Logs out first and in again, so the connections are spread anew. |
-| `-Target <iqn> -Show` | Shows the sessions, their connections, the maximum and the policy. |
+| `... -ChapUser <user>` | Every login and connection with CHAP; the secret is asked for. The same user and secret as `iscsictl chap set` on the target. |
+| `... -ChapUser <user> -MutualChap` | Mutual CHAP: the target authenticates itself too (`iscsictl chap set-mutual`). `-InitiatorSecret` sets the initiator's own secret, which applies to the whole Windows initiator. |
+| `-Target <iqn> -Show` | Shows the sessions, their connections or MPIO paths, and the policy. |
 | `-Target <iqn> -Disconnect` | Logs out every session to the target. |
 | `-Portal <address> -List` | Lists the targets of the portal with the maximum connections per session; for a target without a session it logs in briefly without reporting its disks. |
 
-| `... -ChapUser <user>` | Logs in and opens every connection with CHAP; the secret is asked for. The same user and secret as `iscsictl chap set` on the target. |
-| `... -ChapUser <user> -MutualChap` | Mutual CHAP: the target authenticates itself too (`iscsictl chap set-mutual`). `-InitiatorSecret` sets the initiator's own secret, which applies to the whole Windows initiator. |
+MPIO on Windows Server, once (elevated PowerShell, two restarts):
+
+```powershell
+Install-WindowsFeature -Name Multipath-IO; Restart-Computer
+Enable-MSDSMAutomaticClaim -BusType iSCSI; Restart-Computer
+```
 
 `Get-Help .\mcs-session.ps1 -Detailed` shows all parameters.
 
