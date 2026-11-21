@@ -1,0 +1,22 @@
+iSCSIContainer
+Copyright (c) Emmo Emminghaus mo2000 at mo2000 dot de
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version. See the LICENSE file for the full text.
+
+--------------------------------------------------------------------------------
+Third-party components
+--------------------------------------------------------------------------------
+
+The images are based on Debian and contain Debian packages, each under its own
+license; see /usr/share/doc/<package>/copyright in the images. Among them:
+
+- rtslib-fb (Python library for the kernel target), Apache-2.0 license.
+- targetcli-fb, Apache-2.0 license.
+- PyYAML, MIT license.
+- kmod, GPL-2.0-or-later (tools) and LGPL-2.1-or-later (library).
+
+The kernel target (LIO) itself is part of the host's Linux kernel and is not
+contained in the images.

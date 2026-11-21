@@ -1,0 +1,106 @@
+name: Bug report
+description: Report something that doesn't work as expected.
+labels:
+  - "bug"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill in the fields below;
+        the details make it much easier to reproduce and fix. Remove IQNs, CHAP secrets,
+        host names and addresses you do not want to make public.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before you start
+      options:
+        - label: I searched existing issues and this isn't a duplicate.
+          required: true
+        - label: This is **not** a security vulnerability (those go through [private vulnerability reporting](https://github.com/motwok/iSCSIContainer/security/advisories/new), not a public issue).
+          required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What went wrong, and what did you expect instead?
+      placeholder: The container does not start / the initiator cannot log in / MC/S stays at one connection / ...
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: symptoms
+    attributes:
+      label: Symptoms
+      description: Which did you observe?
+      options:
+        - label: The container does not start or stops right away
+        - label: The target configuration does not match the YAML
+        - label: The initiator does not find the target or cannot log in
+        - label: MC/S does not add connections
+        - label: Throughput is lower than expected
+        - label: Other (describe above)
+
+  - type: input
+    id: version
+    attributes:
+      label: iSCSIContainer version
+      description: Image tag or digest.
+      placeholder: e.g. 1.2.3 or sha256:...
+    validations:
+      required: true
+
+  - type: input
+    id: host
+    attributes:
+      label: Host
+      description: Distribution, kernel (`uname -r`) and Docker version.
+      placeholder: e.g. Debian 13, 6.12, Docker 28
+    validations:
+      required: true
+
+  - type: input
+    id: initiator
+    attributes:
+      label: Initiator
+      description: Operating system and version; MC/S or MPIO in use?
+      placeholder: e.g. Windows 11 24H2, MC/S with 4 connections
+    validations:
+      required: true
+
+  - type: dropdown
+    id: backstore
+    attributes:
+      label: Backstore type
+      options:
+        - file (fileio)
+        - block device (iblock)
+        - other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Container log and configuration
+      description: Output of `docker logs <container>` and, if useful, the YAML configuration (secrets removed).
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Even rough steps help.
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Compose file excerpt, network setup, screenshots, anything else.
+    validations:
+      required: false
