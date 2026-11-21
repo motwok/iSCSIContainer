@@ -17,6 +17,11 @@ license; see /usr/share/doc/<package>/copyright in the images. Among them:
 - targetcli-fb, Apache-2.0 license.
 - PyYAML, MIT license.
 - kmod, GPL-2.0-or-later (tools) and LGPL-2.1-or-later (library).
+- iproute2, GPL-2.0-or-later.
+
+The module service image also contains the Debian build tools (gcc, make and others)
+and, at run time, downloads the Linux kernel source (GPL-2.0-only) of the running
+Debian kernel to build iscsi_target_mod from it.
 
 The kernel target (LIO) itself is part of the host's Linux kernel and is not
 contained in the images.

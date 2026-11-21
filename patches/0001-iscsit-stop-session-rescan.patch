@@ -1,0 +1,89 @@
+From: Emmo Emminghaus
+Subject: [PATCH] scsi: target: iscsi: fix use-after-unlink in iscsit_stop_session()
+
+iscsit_stop_session() walks sess->sess_conn_list with
+list_for_each_entry_safe(), pins the next entry with
+iscsit_inc_conn_usage_count() and drops sess->conn_lock while
+iscsit_cause_connection_reinstatement(conn, 1) sleeps.
+
+While the lock is dropped, iscsit_close_connection() of the closing
+connection calls iscsit_stop_session(sess, 0, 0) for the remaining
+connections of an MC/S session. They close as well and list_del()
+themselves. The usage count keeps the pinned entry from being freed,
+but not from being unlinked, so its next pointer is LIST_POISON1 and
+the walk continues on it:
+
+  general protection fault, probably for non-canonical address
+  0xdeacfffffffffff4
+  RIP: _raw_spin_lock_bh
+   iscsit_inc_conn_usage_count
+   iscsit_stop_session
+   iscsit_release_sessions_for_tpg
+   iscsit_tpg_disable_portal_group
+
+Reproduced by disabling a TPG while a session with four connections is
+logged in; a session with one connection does not crash.
+
+Do not keep a pointer across the unlocked section. Rescan the list from
+its head after each sleep and pick the next connection that is not
+already exiting, failed or being reinstated, the same checks
+iscsit_cause_connection_reinstatement() uses to return early.
+
+---
+diff --git a/drivers/target/iscsi/iscsi_target.c b/drivers/target/iscsi/iscsi_target.c
+index a23553a..2d9df5b 100644
+--- a/drivers/target/iscsi/iscsi_target.c
++++ b/drivers/target/iscsi/iscsi_target.c
+@@ -4751,24 +4751,30 @@ void iscsit_stop_session(
+ 	int session_sleep,
+ 	int connection_sleep)
+ {
+-	u16 conn_count = atomic_read(&sess->nconn);
+-	struct iscsit_conn *conn, *conn_tmp = NULL;
+-	int is_last;
++	struct iscsit_conn *conn, *c;
+ 
+ 	spin_lock_bh(&sess->conn_lock);
+ 
+ 	if (connection_sleep) {
+-		list_for_each_entry_safe(conn, conn_tmp, &sess->sess_conn_list,
+-				conn_list) {
+-			if (conn_count == 0)
++		/*
++		 * Other connections may close and unlink themselves while
++		 * conn_lock is dropped below, so do not keep a next pointer:
++		 * rescan from the head and take the next connection that is
++		 * not already on its way out.
++		 */
++		for (;;) {
++			conn = NULL;
++			list_for_each_entry(c, &sess->sess_conn_list, conn_list) {
++				if (atomic_read(&c->connection_exit) ||
++				    atomic_read(&c->transport_failed) ||
++				    atomic_read(&c->connection_reinstatement))
++					continue;
++				conn = c;
+ 				break;
+-
+-			if (list_is_last(&conn->conn_list, &sess->sess_conn_list)) {
+-				is_last = 1;
+-			} else {
+-				iscsit_inc_conn_usage_count(conn_tmp);
+-				is_last = 0;
+ 			}
++			if (!conn)
++				break;
++
+ 			iscsit_inc_conn_usage_count(conn);
+ 
+ 			spin_unlock_bh(&sess->conn_lock);
+@@ -4776,9 +4782,6 @@ void iscsit_stop_session(
+ 			spin_lock_bh(&sess->conn_lock);
+ 
+ 			iscsit_dec_conn_usage_count(conn);
+-			if (is_last == 0)
+-				iscsit_dec_conn_usage_count(conn_tmp);
+-			conn_count--;
+ 		}
+ 	} else {
+ 		list_for_each_entry(conn, &sess->sess_conn_list, conn_list)

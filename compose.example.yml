@@ -1,0 +1,40 @@
+# Example stack. Adapt the YAML under ISCSI_CONFIG, the LUN path and the interface name.
+services:
+  module:
+    image: ghcr.io/motwok/iscsicontainer-module:latest
+    restart: unless-stopped
+    volumes:
+      - /lib/modules:/host/lib/modules:ro
+      - modules:/modules
+
+  target:
+    image: ghcr.io/motwok/iscsicontainer:latest
+    restart: unless-stopped
+    privileged: true
+    network_mode: host
+    stop_grace_period: 30s
+    volumes:
+      - /lib/modules:/lib/modules:ro
+      - /sys/kernel/config:/sys/kernel/config
+      - /dev:/dev
+      - modules:/modules:ro
+      - config:/config
+      - /srv/iscsi:/luns
+    environment:
+      ISCSI_CONFIG: |
+        targets:
+          - iqn: iqn.2026-01.example.host:storage
+            portal:
+              addresses:
+                - 192.0.2.10
+            max_connections: 8
+            luns:
+              - lun: 0
+                name: data
+                file: /luns/data.img
+            acl:
+              - initiator: iqn.1991-05.com.microsoft:client
+
+volumes:
+  modules:
+  config:

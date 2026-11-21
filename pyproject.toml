@@ -1,0 +1,21 @@
+[project]
+name = "iscsicontainer"
+version = "0.0.0"
+description = "iSCSI target (Linux LIO) in a Docker container, configured by YAML"
+license = "AGPL-3.0-only"
+authors = [{ name = "Emmo Emminghaus" }]
+requires-python = ">=3.13"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: needs the kernel target (privileged container)"]
+
+[tool.coverage.run]
+source = ["iscsicontainer", "iscsimodule"]
+branch = true
+parallel = true
+
+[tool.coverage.report]
+fail_under = 99
+show_missing = true
+skip_covered = true

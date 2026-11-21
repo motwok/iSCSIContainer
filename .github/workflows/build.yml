@@ -1,0 +1,309 @@
+name: Build
+
+on:
+  pull_request:
+    branches:
+      - master
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TARGET_IMAGE: ghcr.io/motwok/iscsicontainer
+  MODULE_IMAGE: ghcr.io/motwok/iscsicontainer-module
+
+jobs:
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: No raw non-ASCII characters in source code
+        run: |
+          ! grep -rnP '[^\x00-\x7F]' src tests tools patches module Dockerfile pyproject.toml
+      - name: Build test image
+        run: docker build --target test -t iscsicontainer:unit .
+      - name: Unit tests
+        run: |
+          mkdir -p cover
+          docker run --rm -v "$PWD/cover:/cover" -e COVERAGE_FILE=/cover/.coverage.unit \
+            iscsicontainer:unit python3 -m pytest tests/unit -q -p no:cacheprovider \
+            --cov=iscsicontainer --cov=iscsimodule --cov-report= --cov-fail-under=0
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cover-unit
+          path: cover
+          include-hidden-files: true
+
+  integration:
+    name: Integration (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Kernel modules of the runner
+        run: |
+          uname -r
+          sudo modprobe iscsi_target_mod 2>/dev/null && sudo modprobe iscsi_tcp 2>/dev/null || {
+            sudo apt-get update -q
+            sudo apt-get install -y -q "linux-modules-extra-$(uname -r)"
+          }
+          for m in target_core_mod target_core_file target_core_iblock iscsi_target_mod iscsi_tcp; do
+            sudo modprobe "$m"
+          done
+          # The end-to-end test must load it from the module cache itself.
+          sudo rmmod iscsi_target_mod
+      - name: Build images
+        run: |
+          docker build --target test -t iscsicontainer:unit .
+          docker build -t iscsicontainer:test .
+          docker build -f module/Dockerfile -t iscsicontainer-module:test .
+      - name: Module service and target on the runner kernel
+        run: sh tests/e2e/run.sh
+      - name: Integration tests with the real kernel target and open-iscsi
+        run: |
+          mkdir -p cover
+          docker run --rm --privileged --network host \
+            -v /lib/modules:/lib/modules:ro -v /sys/kernel/config:/sys/kernel/config -v /dev:/dev \
+            -v "$PWD/cover:/cover" -e ISCSI_INTEGRATION=1 \
+            -e COVERAGE_FILE=/cover/.coverage.integration-${{ matrix.arch }} \
+            -e COVERAGE_PROCESS_START=/work/pyproject.toml \
+            iscsicontainer:unit python3 -m pytest tests/integration -q -p no:cacheprovider -rs \
+            --cov=iscsicontainer --cov=iscsimodule --cov-report= --cov-fail-under=0
+      - name: Kernel log
+        if: failure()
+        run: sudo dmesg | tail -60
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: cover-integration-${{ matrix.arch }}
+          path: cover
+          include-hidden-files: true
+          if-no-files-found: ignore
+
+  module:
+    name: Module build (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build module image
+        run: docker build -f module/Dockerfile -t iscsicontainer-module:test .
+      - name: Patch applies to the newest Debian kernel and the module builds
+        run: docker run --rm iscsicontainer-module:test build-test
+
+  coverage:
+    name: Coverage
+    needs:
+      - unit
+      - integration
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: cover-*
+          path: cover
+          merge-multiple: true
+      - name: Build test image
+        run: docker build --target test -t iscsicontainer:unit .
+      - name: Report (unit and integration together, minimum 99 %)
+        run: |
+          ls -la cover
+          status=0
+          docker run --rm -v "$PWD/cover:/cover" -w /cover iscsicontainer:unit sh -c '
+            python3 -m coverage combine --rcfile=/work/pyproject.toml . &&
+            python3 -m coverage report --rcfile=/work/pyproject.toml --no-skip-covered' \
+            > report.txt || status=$?
+          cat report.txt
+          {
+            echo "## Coverage (unit and integration)"
+            echo '```'
+            cat report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+  images:
+    name: Images for both platforms
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - name: Target image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+      - name: Module image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: module/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: false
+
+  # Releases are switched on with the repository variable RELEASE_ENABLED=true.
+  release:
+    name: Release images
+    if: github.event_name != 'pull_request' && vars.RELEASE_ENABLED == 'true'
+    needs:
+      - unit
+      - integration
+      - module
+      - coverage
+      - images
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+      pull-requests: read
+    outputs:
+      release: ${{ steps.changed.outputs.release }}
+      version: ${{ steps.drafter.outputs.resolved_version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Image changed since last release?
+        id: changed
+        run: |
+          last=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then echo "release=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ -z "$last" ] || ! git diff --quiet "$last" HEAD -- src patches packages Dockerfile module; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "No image-relevant change since $last, no release." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      # The draft gives the version; it is published only after the pushed images passed the smoke test.
+      - name: Draft release
+        id: drafter
+        if: steps.changed.outputs.release == 'true'
+        uses: release-drafter/release-drafter@v7
+        with:
+          config-name: release-drafter.yml
+          publish: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-qemu-action@v4
+        if: steps.changed.outputs.release == 'true'
+      - uses: docker/setup-buildx-action@v4
+        if: steps.changed.outputs.release == 'true'
+      - uses: docker/login-action@v4
+        if: steps.changed.outputs.release == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Target image
+        if: steps.changed.outputs.release == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          build-args: VERSION=${{ steps.drafter.outputs.resolved_version }}
+          tags: ${{ env.TARGET_IMAGE }}:${{ steps.drafter.outputs.resolved_version }}
+      - name: Module image
+        if: steps.changed.outputs.release == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: module/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          build-args: VERSION=${{ steps.drafter.outputs.resolved_version }}
+          tags: ${{ env.MODULE_IMAGE }}:${{ steps.drafter.outputs.resolved_version }}
+
+  # The pushed images, pulled from the registry, must start and work together.
+  smoke:
+    name: Smoke (linux/${{ matrix.arch }})
+    needs: release
+    if: needs.release.outputs.release == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Kernel modules of the runner
+        run: |
+          sudo modprobe target_core_mod 2>/dev/null || {
+            sudo apt-get update -q
+            sudo apt-get install -y -q "linux-modules-extra-$(uname -r)"
+          }
+      - name: Pushed images report their version and work together
+        env:
+          V: ${{ needs.release.outputs.version }}
+        run: |
+          [ "$(docker run --rm "$TARGET_IMAGE:$V" version)" = "$V" ]
+          TARGET_IMAGE="$TARGET_IMAGE:$V" MODULE_IMAGE="$MODULE_IMAGE:$V" sh tests/e2e/run.sh
+
+  publish:
+    name: Publish release
+    needs:
+      - release
+      - smoke
+    if: needs.release.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+      pull-requests: read
+    steps:
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tag :latest
+        env:
+          V: ${{ needs.release.outputs.version }}
+        run: |
+          docker buildx imagetools create -t "$TARGET_IMAGE:latest" "$TARGET_IMAGE:$V"
+          docker buildx imagetools create -t "$MODULE_IMAGE:latest" "$MODULE_IMAGE:$V"
+      - name: Publish release
+        uses: release-drafter/release-drafter@v7
+        with:
+          config-name: release-drafter.yml
+          version: ${{ needs.release.outputs.version }}
+          publish: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

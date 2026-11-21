@@ -4,6 +4,8 @@ updates:
     directory: /
     schedule:
       interval: daily
+    # 0 pauses version updates until the first version is confirmed.
+    open-pull-requests-limit: 0
     cooldown:
       default-days: 3
     labels:

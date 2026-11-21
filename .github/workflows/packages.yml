@@ -1,0 +1,53 @@
+name: Package update
+
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  packages:
+    name: Record the image packages
+    runs-on: ubuntu-24.04
+    env:
+      # Fine-grained personal token; a pull request opened with GITHUB_TOKEN would not start Build.
+      GH_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.PACKAGES_TOKEN || github.token }}
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - name: Build both images and list their packages
+        run: sh tools/packages.sh
+      - name: Changed?
+        id: diff
+        run: |
+          git add -N packages
+          if git diff --quiet -- packages; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No package changed." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --stat -- packages
+          fi
+      - name: Pull request
+        if: steps.diff.outputs.changed == 'true' && env.GH_TOKEN != ''
+        run: |
+          git config user.name "Emmo Emminghaus"
+          git config user.email "${{ vars.PACKAGES_EMAIL || 'motwok@users.noreply.github.com' }}"
+          git checkout -B chore/image-packages
+          git add packages
+          git commit -q -m "chore(deps): update image packages"
+          git push -f origin chore/image-packages
+          gh pr view chore/image-packages --json state --jq .state 2>/dev/null | grep -q OPEN ||
+            gh pr create --base master --head chore/image-packages \
+              --title "chore(deps): update image packages" --body "Installed package versions changed." \
+              --label dependencies
+          gh pr merge --auto --squash chore/image-packages
+      - name: No token
+        if: steps.diff.outputs.changed == 'true' && env.GH_TOKEN == ''
+        run: echo "Packages changed, but the secret PACKAGES_TOKEN is not set; no pull request." >> "$GITHUB_STEP_SUMMARY"

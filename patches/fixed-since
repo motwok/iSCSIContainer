@@ -1,0 +1,2 @@
+# Debian kernel versions from which the iscsit_stop_session() bug is fixed without this patch,
+# one version per line. Empty as long as no Debian kernel contains a fix.

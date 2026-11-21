@@ -14,6 +14,7 @@ flowchart LR
   I[iSCSI initiator] -->|"one session: one TCP connection, or several with MC/S"| K
   subgraph H[Docker host]
     Y[YAML: file or environment variable] --> C
+    M[module service] -->|patched iscsi_target_mod| C
     C[iSCSIContainer] -->|configfs| K[LIO in the host kernel]
     L[(LUN files or block devices)] --- K
   end
@@ -35,6 +36,46 @@ flowchart LR
   is switched off: every session gets a single connection and a warning is logged. This is
   maintained for Debian kernels only; on other distributions you have to take care of the patch
   yourself.
+
+## Quick start
+
+1. Copy [compose.example.yml](compose.example.yml) and adapt the YAML under `ISCSI_CONFIG`: target
+   name, portal address or interface, LUNs and the initiator names that may log in.
+2. Create the LUN files or name block devices. A missing file is not created: that LUN is not
+   exported and the container reports unhealthy.
+3. Start the stack. `docker logs` of the target shows what was exported and every problem.
+4. Optional: set CHAP passwords, see below.
+
+Everything that can be configured is described in [docs/configuration.md](docs/configuration.md).
+
+## Commands
+
+Run them in the target container, for example `docker exec -it <container> iscsictl ...`:
+
+| Command | What it does |
+|---|---|
+| `iscsictl health` | Exit code 0 if everything from the YAML is exported; otherwise it prints what is not. Used as the health check. |
+| `iscsictl chap set <target> <initiator> <user>` | Sets the initiator's CHAP user and password. The password is asked twice; without a terminal it is read as one line from standard input. |
+| `iscsictl chap set-mutual <target> <initiator> <user>` | Sets the user and password the target uses towards that initiator (mutual CHAP). |
+| `iscsictl chap remove <target> <initiator>` | Removes both. |
+| `iscsictl chap remove-mutual <target> <initiator>` | Removes only mutual CHAP. |
+| `iscsictl chap list` | Lists users, never passwords. |
+
+Passwords are applied to the running target at once and are kept on the config volume, not in the
+YAML. As soon as one password is set for a target, every initiator of that target needs one.
+
+## Metrics
+
+Prometheus metrics are served on port 9482 at `/metrics`: whether targets, LUNs and portals are up,
+sessions and TCP connections per initiator, commands and bytes per LUN, refused logins, and whether
+MC/S is active.
+
+## Requirements
+
+- A Linux host whose kernel has the target modules (`target_core_mod`, `iscsi_target_mod`).
+- Docker with `privileged: true` for the target, and the mounts shown in the example.
+- For MC/S: a Debian kernel, Secure Boot off (the patched module is not signed) and network access
+  for the module service. Without them the target runs with single connections.
 
 ## License
 
