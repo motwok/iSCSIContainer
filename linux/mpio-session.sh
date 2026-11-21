@@ -157,6 +157,27 @@ wait_settle() {
     udevadm settle --timeout=30 || true
 }
 
+# The login returns before the kernel has scanned the LUNs; wait until they are there and their
+# number stays the same for two seconds.
+wait_luns() {
+    i=0
+    last=-1
+    stable=0
+    while [ "$i" -lt 30 ]; do
+        wait_settle
+        n=$(target_wwids | wc -l | tr -d ' ')
+        if [ "$n" -gt 0 ] && [ "$n" -eq "$last" ]; then
+            stable=$((stable + 1))
+            [ "$stable" -lt 2 ] || return 0
+        else
+            stable=0
+        fi
+        last=$n
+        i=$((i + 1))
+        sleep 1
+    done
+}
+
 read_secret() {
     if [ -t 0 ]; then
         printf '%s: ' "$1" > /dev/tty
@@ -325,7 +346,7 @@ if [ "$(count_sessions "$TARGET")" -eq 0 ]; then
 elif [ -n "$CHAP_USER" ]; then
     set_chap
 fi
-wait_settle
+wait_luns
 
 if [ "$SESSIONS" -gt 1 ] || [ "$(count_sessions "$TARGET")" -gt 1 ]; then
     multipath_ready || die "several sessions are open, but multipathd is not running"
