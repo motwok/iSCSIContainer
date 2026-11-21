@@ -88,6 +88,35 @@ powershell -ExecutionPolicy Bypass -File .\mcs-session.ps1 -Target <target-iqn> 
 
 `Get-Help .\mcs-session.ps1 -Detailed` shows all parameters.
 
+## Linux initiator with several sessions
+
+The Linux initiator open-iscsi has no MC/S: each session has exactly one TCP connection. The Linux
+way to use several links for one LUN is several sessions bundled with dm-multipath.
+[linux/mpio-session.sh](linux/mpio-session.sh) (POSIX `sh`, run as root) does that: it logs in,
+puts every LUN of the target under multipath with the path selector `queue-length` (the
+counterpart of "Least Queue Depth"), then opens the further sessions.
+
+```sh
+sh mpio-session.sh -t <target-iqn> -p <address> -n 16
+```
+
+| Call | What it does |
+|---|---|
+| `-t <iqn> -p <address> [-n <sessions>]` | Logs in if needed, adds or removes sessions up to `n` (default 16), sets the path selector (`-s` for another). |
+| `... -r` | Logs out first and in again, so the sessions are spread anew. |
+| `... -c <user> [-m <user>]` | CHAP, and mutual CHAP with `-m`; the secrets are asked for (or read from standard input). |
+| `-t <iqn> -S` | Shows the sessions and the multipath devices with their paths and policy. |
+| `-t <iqn> -D [-f]` | Logs out every session and removes the multipath devices; refuses while a device is in use unless `-f`. |
+| `-p <address> -L` | Lists the targets of the portal and the sessions to each. |
+
+It needs open-iscsi (`iscsiadm`, `iscsid` running) and, for more than one session,
+multipath-tools with `multipathd` running; it installs nothing. Several sessions to a LUN without
+multipath look like independent disks and destroy its data, so the script opens a second session
+only once every LUN is a multipath device. Use the device in `/dev/mapper/`, never the single
+`/dev/sdX` paths. For each LUN it writes a small `multipaths` entry into multipath's `conf.d`
+directory; nothing else of the multipath configuration is changed. `sh mpio-session.sh -h` shows
+all options.
+
 ## Metrics
 
 Prometheus metrics are served on port 9482 at `/metrics`: whether targets, LUNs and portals are up,

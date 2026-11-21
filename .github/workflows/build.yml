@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: No raw non-ASCII characters in source code
         run: |
-          ! grep -rnP '[^\x00-\x7F]' src tests tools patches module windows Dockerfile pyproject.toml
+          ! grep -rnP '[^\x00-\x7F]' src tests tools patches module windows linux Dockerfile pyproject.toml
       - name: Build test image
         run: docker build --target test -t iscsicontainer:unit .
       - name: Unit tests
@@ -116,6 +116,44 @@ jobs:
       - name: Patch applies to the newest Debian kernel and the module builds
         run: docker run --rm iscsicontainer-module:test build-test
 
+  linux-script:
+    name: Linux MPIO script (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Shell checks
+        run: |
+          sh -n linux/mpio-session.sh
+          shellcheck -s sh linux/mpio-session.sh
+      - name: Kernel modules, open-iscsi and multipath-tools of the runner
+        run: |
+          sudo modprobe target_core_mod 2>/dev/null && sudo modprobe iscsi_tcp 2>/dev/null || {
+            sudo apt-get update -q
+            sudo apt-get install -y -q "linux-modules-extra-$(uname -r)"
+          }
+          sudo modprobe dm_multipath
+          sudo apt-get update -q
+          sudo apt-get install -y -q open-iscsi multipath-tools
+          echo "InitiatorName=iqn.2026-11.test.integration:init" | sudo tee /etc/iscsi/initiatorname.iscsi
+          sudo systemctl restart iscsid
+          sudo systemctl restart multipathd
+          sudo multipathd show daemon
+      - name: Build target image
+        run: docker build -t iscsicontainer:test .
+      - name: Script against the real target with dm-multipath
+        run: sudo sh tests/linux/run.sh
+      - name: Kernel log
+        if: failure()
+        run: sudo dmesg | tail -60
+
   coverage:
     name: Coverage
     needs:
@@ -157,6 +195,7 @@ jobs:
       - unit
       - integration
       - module
+      - linux-script
       - coverage
     runs-on: ubuntu-24.04
     permissions:
