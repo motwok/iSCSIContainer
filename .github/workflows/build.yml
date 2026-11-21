@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: No raw non-ASCII characters in source code
         run: |
-          ! grep -rnP '[^\x00-\x7F]' src tests tools patches module Dockerfile pyproject.toml
+          ! grep -rnP '[^\x00-\x7F]' src tests tools patches module windows Dockerfile pyproject.toml
       - name: Build test image
         run: docker build --target test -t iscsicontainer:unit .
       - name: Unit tests

@@ -64,6 +64,30 @@ Run them in the target container, for example `docker exec -it <container> iscsi
 Passwords are applied to the running target at once and are kept on the config volume, not in the
 YAML. As soon as one password is set for a target, every initiator of that target needs one.
 
+## Windows initiator with MC/S
+
+[windows/mcs-session.ps1](windows/mcs-session.ps1) opens the session with the wanted number of
+connections and sets the MCS policy "Least Queue Depth", instead of adding every connection in the
+`iscsicpl` dialog. Run it in an elevated PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\mcs-session.ps1 -Target <target-iqn> -Portal <address> -Connections 16
+```
+
+| Call | What it does |
+|---|---|
+| `-Target <iqn> -Portal <address>` | Logs in if needed and opens as many connections as the target allows (`max_connections`), sets "Least Queue Depth" (`-Policy` for another). |
+| `... -Connections <n>` | The same with exactly `n` connections; adds or removes connections as needed. |
+| `... -Reconnect` | Logs out first and in again, so the connections are spread anew. |
+| `-Target <iqn> -Show` | Shows the sessions, their connections, the maximum and the policy. |
+| `-Target <iqn> -Disconnect` | Logs out every session to the target. |
+| `-Portal <address> -List` | Lists the targets of the portal with the maximum connections per session; for a target without a session it logs in briefly without reporting its disks. |
+
+| `... -ChapUser <user>` | Logs in and opens every connection with CHAP; the secret is asked for. The same user and secret as `iscsictl chap set` on the target. |
+| `... -ChapUser <user> -MutualChap` | Mutual CHAP: the target authenticates itself too (`iscsictl chap set-mutual`). `-InitiatorSecret` sets the initiator's own secret, which applies to the whole Windows initiator. |
+
+`Get-Help .\mcs-session.ps1 -Detailed` shows all parameters.
+
 ## Metrics
 
 Prometheus metrics are served on port 9482 at `/metrics`: whether targets, LUNs and portals are up,

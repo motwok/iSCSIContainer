@@ -95,8 +95,30 @@ A module that is loaded once stays loaded until the next reboot. After the first
 which the unpatched module is already loaded, reboot once.
 
 On the Windows initiator use the MCS policy "Least Queue Depth" and add connections up to the
-configured number. With Round Robin every connection carries the same amount, so the slowest link
-sets the pace for all. Over four 1 GbE links 16 connections spread best; with fewer, the hashes of
-the team, the switch and the bond often put several connections on one link while another stays
-idle. Ethernet flow control (pause frames) on the switch ports can cost about a third of the
-throughput: the switch then stops whole ports instead of single connections.
+configured number, by hand in `iscsicpl` or with [windows/mcs-session.ps1](../windows/mcs-session.ps1)
+(see the README). With Round Robin every connection carries the same amount, so the slowest link
+sets the pace for all. Ethernet flow control (pause frames) on the switch ports can cost about a
+third of the throughput: the switch then stops whole ports instead of single connections.
+
+### Number of connections
+
+Each TCP connection runs over one link; which link is decided by a hash over addresses and ports,
+separately on each side: by the client's NIC team for what it sends, by the switch towards each
+end, and by the server's bond for what it sends. **How evenly that hash spreads the connections
+depends strongly on the switch and on the operating systems** (team and bond algorithms, hash
+settings). With too few connections several of them often land on one link while another stays
+idle.
+
+In our tests (Windows 11 with an LBFO team over 4 x 1 GbE, a switch hashing over IP addresses and
+TCP ports, a Linux bond with `xmit_hash_policy` `encap3+4`, flow control off, Least Queue Depth),
+**16 connections gave the best results**, up to about 3.6 Gbit/s in both directions:
+
+| Connections | Write, mean of 3 sessions | Read, mean of 3 sessions |
+|---|---|---|
+| 8 | 2.5 Gbit/s | 2.9 Gbit/s |
+| 12 | 3.1 Gbit/s | 3.2 Gbit/s |
+| 16 | 3.2 Gbit/s | 3.4 Gbit/s |
+
+Even with 16 a single session can stay below that when the hash happens to put several connections
+on one link; logging in again (`mcs-session.ps1 -Reconnect`) gives a new spread. Other switches and
+systems can need more or fewer connections; measure with your own setup.
