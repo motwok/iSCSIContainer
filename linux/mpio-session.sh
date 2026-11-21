@@ -272,9 +272,14 @@ map_exists() {
     multipathd show maps format "%n" 2> /dev/null | awk 'NR > 1' | grep -qx "$1"
 }
 
-# Open count of a device-mapper device (mounted, held by LVM, opened by a program).
+# Open count of a multipath map (mounted, held by LVM, opened by a program). The partition maps
+# multipath creates for it (uuid "partN-<map uuid>") each hold the map once; their own opens count.
 map_open_count() {
-    dmsetup info -c --noheadings -o open "$1" 2> /dev/null | tr -d ' '
+    uuid=$(dmsetup info -c --noheadings -o uuid "$1" 2> /dev/null | tr -d ' ')
+    dmsetup info -c --noheadings --separator ' ' -o open,uuid 2> /dev/null | awk -v u="$uuid" '
+        $2 == u { n += $1 }
+        $2 ~ /^part[0-9]+-/ && substr($2, index($2, "-") + 1) == u { n += $1 - 1 }
+        END { print n + 0 }'
 }
 
 disconnect() {

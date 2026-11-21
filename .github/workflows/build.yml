@@ -170,7 +170,7 @@ jobs:
           }
           sudo modprobe dm_multipath
           sudo apt-get update -q
-          sudo apt-get install -y -q open-iscsi multipath-tools
+          sudo apt-get install -y -q open-iscsi multipath-tools kpartx fdisk
           echo "InitiatorName=iqn.2026-11.test.integration:init" | sudo tee /etc/iscsi/initiatorname.iscsi
           sudo systemctl restart iscsid
           sudo systemctl restart multipathd

@@ -153,6 +153,26 @@ wait "$holder" 2> /dev/null || true
 multipath -F > /dev/null 2>&1 || true
 [ -z "$(maps)" ] || fail "-f: multipath devices left after the holder ended: $(maps)"
 
+echo "== partitioned LUN"
+mpio -n 2
+m=$(maps | sed -n 1p)
+printf 'label: gpt\n,16M\n,\n' | sfdisk -q "/dev/mapper/$m" || true
+udevadm settle
+uuid=$(dmsetup info -c --noheadings -o uuid "$m" | tr -d ' ')
+part_map() { dmsetup info -c --noheadings --separator ' ' -o name,uuid | awk -v u="part2-$uuid" '$2 == u { print $1 }'; }
+[ -n "$(part_map)" ] || { kpartx -a "/dev/mapper/$m"; udevadm settle; }
+part=$(part_map)
+[ -n "$part" ] || fail "no partition maps for $m"
+# shellcheck disable=SC2016
+sh -c 'exec 3< "$1"; exec sleep 60' holder "/dev/mapper/$part" &
+holder=$!
+sleep 1
+if "$SH" "$SCRIPT" -t "$IQN" -D; then fail "disconnect did not refuse a partition in use"; fi
+kill "$holder"
+wait "$holder" 2> /dev/null || true
+disconnect_clean partitions
+[ -z "$(part_map)" ] || fail "partition maps left: $(part_map)"
+
 echo "== IPv6 portal"
 "$SH" "$SCRIPT" -t "$IQN" -p ::1 -n 2
 [ "$(sessions)" = 2 ] || fail "IPv6: not 2 sessions"
