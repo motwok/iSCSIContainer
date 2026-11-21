@@ -171,6 +171,15 @@ def diagnostics():
                       sh("sh", "-c", "dmesg | tail -15", check=False).stdout])
 
 
+def usable(disk):
+    # The node can exist before the disk answers (or be left over from the session before).
+    try:
+        os.close(os.open(disk, os.O_RDONLY))
+    except OSError:
+        return False
+    return True
+
+
 def login(count=1):
     result = node("--login", check=False)
     if "could not communicate to iscsid" in result.stderr:
@@ -179,7 +188,7 @@ def login(count=1):
     assert result.returncode == 0, result.stdout + result.stderr + diagnostics()
     deadline = time.time() + 30
     while True:
-        found = [d for d in disks() if os.path.exists(d)]
+        found = [d for d in disks() if usable(d)]
         if len(found) == count:
             return found
         assert time.time() < deadline, f"disks {found}"
