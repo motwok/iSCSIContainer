@@ -71,12 +71,18 @@ jobs:
           docker build -f module/Dockerfile -t iscsicontainer-module:test .
       - name: Module service and target on the runner kernel
         run: sh tests/e2e/run.sh
+      - name: Initiator of the runner
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q open-iscsi
+          echo "InitiatorName=iqn.2026-11.test.integration:init" | sudo tee /etc/iscsi/initiatorname.iscsi
+          sudo systemctl restart iscsid
       - name: Integration tests with the real kernel target and open-iscsi
         run: |
           mkdir -p cover
-          docker run --rm --privileged --network host \
+          docker run --rm --privileged --network host --pid host \
             -v /lib/modules:/lib/modules:ro -v /sys/kernel/config:/sys/kernel/config -v /dev:/dev \
-            -v "$PWD/cover:/cover" -e ISCSI_INTEGRATION=1 \
+            -v "$PWD/cover:/cover" -e ISCSI_INTEGRATION=1 -e ISCSI_HOST_INITIATOR=1 \
             -e COVERAGE_FILE=/cover/.coverage.integration-${{ matrix.arch }} \
             -e COVERAGE_PROCESS_START=/work/pyproject.toml \
             iscsicontainer:unit python3 -m pytest tests/integration -q -p no:cacheprovider -rs \

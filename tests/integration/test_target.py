@@ -41,6 +41,18 @@ def sh(*args, check=True, stdin=None):
     return result
 
 
+# The initiator of the Docker host (ISCSI_HOST_INITIATOR=1, container with --pid host) or one
+# started in this container. Inside a container iscsid does not find the kernel's transport
+# on every host.
+HOST = []
+if os.environ.get("ISCSI_HOST_INITIATOR") == "1":
+    HOST = ["nsenter", "-t", "1", "-m", "-n", "-i", "-u", "--"]
+
+
+def adm(*args, check=True):
+    return sh(*HOST, "iscsiadm", *args, check=check)
+
+
 def read(path):
     with open(path, encoding="utf-8") as handle:
         return handle.read().strip()
@@ -48,6 +60,10 @@ def read(path):
 
 @pytest.fixture(scope="module", autouse=True)
 def initiator():
+    if HOST:
+        yield
+        adm("-m", "node", "--logoutall=all", check=False)
+        return
     sh("modprobe", "iscsi_tcp")
     os.makedirs("/etc/iscsi", exist_ok=True)
     with open("/etc/iscsi/initiatorname.iscsi", "w", encoding="ascii") as handle:
@@ -56,7 +72,7 @@ def initiator():
                               stderr=subprocess.DEVNULL)
     time.sleep(1)
     yield
-    sh("iscsiadm", "-m", "node", "--logoutall=all", check=False)
+    adm("-m", "node", "--logoutall=all", check=False)
     daemon.terminate()
     daemon.wait(10)
 
@@ -64,8 +80,8 @@ def initiator():
 @pytest.fixture(autouse=True)
 def clean():
     shutil.rmtree("/config/chap", ignore_errors=True)
-    shutil.rmtree("/etc/iscsi/nodes", ignore_errors=True)
-    shutil.rmtree("/etc/iscsi/send_targets", ignore_errors=True)
+    adm("-m", "node", "-o", "delete", check=False)
+    adm("-m", "discoverydb", "-t", "sendtargets", "-p", PORTAL, "-o", "delete", check=False)
     yield
 
 
@@ -116,7 +132,7 @@ def start(tmp_path):
         started.append(Running(cfg, str(tmp_path / f"target{len(started)}.log")))
         return started[-1]
     yield run
-    sh("iscsiadm", "-m", "node", "--logoutall=all", check=False)
+    adm("-m", "node", "--logoutall=all", check=False)
     for target in started:
         target.stop()
 
@@ -131,11 +147,11 @@ def metrics():
 
 
 def node(*args, check=True):
-    return sh("iscsiadm", "-m", "node", "-T", TARGET, "-p", PORTAL, *args, check=check)
+    return adm("-m", "node", "-T", TARGET, "-p", PORTAL, *args, check=check)
 
 
 def discover():
-    result = sh("iscsiadm", "-m", "discovery", "-t", "sendtargets", "-p", PORTAL, check=False)
+    result = adm("-m", "discovery", "-t", "sendtargets", "-p", PORTAL, check=False)
     if "connect to iscsid" in result.stderr:
         pytest.skip("the initiator cannot be used in this network namespace")
     assert result.returncode == 0 and TARGET in result.stdout, result.stdout + result.stderr
@@ -143,7 +159,7 @@ def discover():
 
 
 def disks():
-    out = sh("iscsiadm", "-m", "session", "-P", "3").stdout
+    out = adm("-m", "session", "-P", "3").stdout
     return sorted("/dev/" + name for name in re.findall(r"Attached scsi disk (\S+)", out))
 
 
@@ -223,7 +239,7 @@ def test_block_device_lun(start, image, tmp_path):
         with open(image, "rb") as handle:
             assert handle.read(len(data)) == data
     finally:
-        sh("iscsiadm", "-m", "node", "--logoutall=all", check=False)
+        adm("-m", "node", "--logoutall=all", check=False)
         time.sleep(1)
         sh("losetup", "-d", loop, check=False)
 
