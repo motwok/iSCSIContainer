@@ -6,6 +6,9 @@ module service `ghcr.io/motwok/iscsicontainer-module`, with one common version i
 image is a release** of both. Merges that only touch documentation or CI build nothing new; they are listed in
 the next real release. There is no manual release step: merging a pull request is the approval.
 
+Releases are switched on with the repository variable `RELEASE_ENABLED`. As long as it is not `true`
+(before the first release), the Build workflow only builds and tests.
+
 ## Images
 
 Both images are based on `debian:trixie-slim` and tagged `:X.Y.Z` and `:latest`. Each tag is a manifest

@@ -89,10 +89,11 @@ class Running:
         if os.path.exists(STATE):
             os.remove(STATE)
         self.log = log
-        environ = dict(os.environ, ISCSI_CONFIG=yaml.safe_dump(cfg))
-        environ.pop("ISCSI_CONFIG_FILE", None)
+        # As in the container: every later iscsictl call sees the same configuration.
+        os.environ["ISCSI_CONFIG"] = yaml.safe_dump(cfg)
+        os.environ.pop("ISCSI_CONFIG_FILE", None)
         with open(log, "w", encoding="utf-8") as handle:
-            self.process = subprocess.Popen(["iscsictl", "run"], env=environ, stderr=handle)
+            self.process = subprocess.Popen(["iscsictl", "run"], stderr=handle)
         deadline = time.time() + 120
         while not os.path.exists(STATE) and self.process.poll() is None:
             assert time.time() < deadline, self.output()
@@ -146,12 +147,20 @@ def disks():
     return sorted("/dev/" + name for name in re.findall(r"Attached scsi disk (\S+)", out))
 
 
+def diagnostics():
+    found = None
+    if os.path.isdir("/sys/class/iscsi_transport"):
+        found = os.listdir("/sys/class/iscsi_transport")
+    return "\n".join([f"transports {found}", sh("lsmod", check=False).stdout,
+                      sh("sh", "-c", "dmesg | tail -15", check=False).stdout])
+
+
 def login(count=1):
     result = node("--login", check=False)
     if "could not communicate to iscsid" in result.stderr:
         # The iSCSI netlink family only exists in the initial network namespace.
         pytest.skip("the initiator cannot be used in this network namespace")
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr + diagnostics()
     deadline = time.time() + 30
     while True:
         found = [d for d in disks() if os.path.exists(d)]
