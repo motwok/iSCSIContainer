@@ -20,7 +20,7 @@ targets:
         - 192.0.2.10
         - fd00::10
       port: 3260
-    max_connections: 8
+    max_connections: 16
     chap: true
     parameters:
       MaxBurstLength: 1048576
@@ -95,4 +95,8 @@ A module that is loaded once stays loaded until the next reboot. After the first
 which the unpatched module is already loaded, reboot once.
 
 On the Windows initiator use the MCS policy "Least Queue Depth" and add connections up to the
-configured number.
+configured number. With Round Robin every connection carries the same amount, so the slowest link
+sets the pace for all. Over four 1 GbE links 16 connections spread best; with fewer, the hashes of
+the team, the switch and the bond often put several connections on one link while another stays
+idle. Ethernet flow control (pause frames) on the switch ports can cost about a third of the
+throughput: the switch then stops whole ports instead of single connections.

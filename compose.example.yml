@@ -27,7 +27,7 @@ services:
             portal:
               addresses:
                 - 192.0.2.10
-            max_connections: 8
+            max_connections: 16
             luns:
               - lun: 0
                 name: data
