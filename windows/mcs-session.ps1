@@ -419,22 +419,30 @@ function Set-Mcs {
     if ($sessions.Count -gt 1) {
         throw "There are $($sessions.Count) sessions to $Target (MPIO?). Use -Reconnect to log out all of them and start one MC/S session."
     }
+    $fresh = $false
     if (-not $sessions) {
         Write-Host "Logging in to $Target at ${Portal}:$Port (MC/S)"
         Connect-Session $false
         $sessions = @(Get-Sessions $Target)
         if ($sessions.Count -ne 1) { throw "Expected one session after the login, found $($sessions.Count)." }
+        $fresh = $true
     }
     $session = $sessions[0]
 
+    # The maximum is only known after the login; a session opened just for this is closed again.
     $max = Get-MaxConnections $session
     $count = $Connections
+    $problem = $null
     if (-not $script:connectionsGiven) {
-        if (-not $max) { throw 'The maximum number of connections of the session is unknown; give -Connections.' }
-        $count = $max
+        if ($max) { $count = $max }
+        else { $problem = 'The maximum number of connections of the session is unknown; give -Connections.' }
     }
     elseif ($max -and $count -gt $max) {
-        throw "The target allows at most $max connection(s) per session (max_connections in its YAML)."
+        $problem = "The target allows at most $max connection(s) per session (max_connections in its YAML)."
+    }
+    if ($problem) {
+        if ($fresh) { Assert-Ok (Invoke-CimMethod -InputObject $session -MethodName Logout) 'Logout' }
+        throw $problem
     }
     $have = @($session.ConnectionInformation).Count
     $portalInfo = New-CimInstance -Namespace $ns -ClassName MSiSCSIInitiator_Portal -ClientOnly -Property @{

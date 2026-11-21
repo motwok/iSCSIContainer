@@ -200,6 +200,7 @@ jobs:
       - unit
       - integration
       - module
+      - module-vm
       - linux-script
       - coverage
     runs-on: ubuntu-24.04
