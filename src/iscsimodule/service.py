@@ -153,12 +153,19 @@ def _snapshot_sources(version, fetch):
     with fetch(f"{SNAPSHOT}/mr/package/linux/{version}/srcfiles?fileinfo=1") as response:
         data = json.load(response)
     seen = [entry for entries in data.get("fileinfo", {}).values() for entry in entries]
-    if not seen:
+    # The files are also listed in archives such as debian-security-debug; only these two carry
+    # the source and the headers.
+    for archive in ("debian", "debian-security"):
+        found = [entry for entry in seen if entry.get("archive_name") == archive]
+        if found:
+            break
+    else:
         raise BuildError(f"linux {version} is not in the snapshot archive")
-    first = min(seen, key=lambda entry: entry["first_seen"])
-    archive, stamp = first["archive_name"], first["first_seen"]
+    stamp = min(entry["first_seen"] for entry in found)
     name = _codename()
-    suites = [name + "-security"] if archive == "debian-security" else [name, name + "-updates"]
+    # A point release kernel first appears in proposed-updates.
+    suites = ([name + "-security"] if archive == "debian-security"
+              else [name, name + "-updates", name + "-proposed-updates"])
     lines = []
     for suite in suites:
         for kind in ("deb", "deb-src"):

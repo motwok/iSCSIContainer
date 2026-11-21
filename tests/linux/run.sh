@@ -2,6 +2,7 @@
 # linux/mpio-session.sh against the real target, with open-iscsi and dm-multipath of the host.
 # Needs root, open-iscsi with iscsid running, multipath-tools with multipathd running, Docker.
 # TARGET_IMAGE: image to test. The host's initiator name must be INITIATOR below.
+# SH: shell that runs the script (default sh). MPIO_STRICT=1: multipath with find_multipaths strict.
 set -eu
 TARGET_IMAGE=${TARGET_IMAGE:-iscsicontainer:test}
 SCRIPT=$(cd "$(dirname "$0")/../.." && pwd)/linux/mpio-session.sh
@@ -9,16 +10,20 @@ IQN=iqn.2026-11.test.mpio:target
 INITIATOR=iqn.2026-11.test.integration:init
 SECRET=mpio-secret-123
 MUTUAL=mpio-mutual-456
-mpio() { sh "$SCRIPT" -t "$IQN" -p 127.0.0.1 "$@"; }
+SH=${SH:-sh}
+STRICT_CONF=/etc/multipath/conf.d/zz-test-strict.conf
+mpio() { "$SH" "$SCRIPT" -t "$IQN" -p 127.0.0.1 "$@"; }
 
 cleanup() {
-    sh "$SCRIPT" -t "$IQN" -D -f > /dev/null 2>&1 || true
+    "$SH" "$SCRIPT" -t "$IQN" -D -f > /dev/null 2>&1 || true
+    multipath -F > /dev/null 2>&1 || true
+    if [ -f "$STRICT_CONF" ]; then rm -f "$STRICT_CONF"; multipathd reconfigure > /dev/null 2>&1 || true; fi
     docker rm -f mpio-target > /dev/null 2>&1 || true
     docker volume rm -f mpio-luns mpio-config > /dev/null 2>&1 || true
 }
 fail() {
     echo "FAILED: $1"
-    sh "$SCRIPT" -t "$IQN" -S || true
+    "$SH" "$SCRIPT" -t "$IQN" -S || true
     multipath -ll || true
     docker logs mpio-target 2>&1 | tail -30 || true
     cleanup
@@ -30,7 +35,7 @@ targets:
   - iqn: $IQN
     portal:
       addresses:
-        - 127.0.0.1
+$(target_addresses)
     luns:
       - lun: 0
         name: mpio0
@@ -42,6 +47,11 @@ targets:
       - initiator: $INITIATOR
 YAML
 }
+target_addresses() {
+    printf '        - 127.0.0.1
+        - "::1"
+'
+}
 sessions() {
     iscsiadm -m session 2> /dev/null | awk -v t="$IQN" '$4 == t' | wc -l | tr -d ' '
 }
@@ -51,7 +61,7 @@ maps() {
 }
 # Logs out with the script and checks that nothing is left and nothing was warned about.
 disconnect_clean() {
-    sh "$SCRIPT" -t "$IQN" -D 2> /tmp/mpio.err
+    "$SH" "$SCRIPT" -t "$IQN" -D 2> /tmp/mpio.err
     cat /tmp/mpio.err
     [ "$(sessions)" = 0 ] || fail "$1: sessions left"
     [ -z "$(maps)" ] || fail "$1: multipath devices left: $(maps)"
@@ -62,6 +72,17 @@ paths() {
 }
 
 cleanup
+if [ "${MPIO_STRICT:-0}" = 1 ]; then
+    # Only WWIDs in /etc/multipath/wwids become maps, as on RHEL; start without any of ours.
+    mkdir -p "$(dirname "$STRICT_CONF")"
+    printf 'defaults {
+	find_multipaths strict
+}
+' > "$STRICT_CONF"
+    sed -i '/^\/36001405/d' /etc/multipath/wwids 2> /dev/null || true
+    multipathd reconfigure > /dev/null
+    multipath -t | grep -q 'find_multipaths "strict"' || fail "find_multipaths strict not active"
+fi
 [ "$(sed -n 's/^InitiatorName=//p' /etc/iscsi/initiatorname.iscsi)" = "$INITIATOR" ] ||
     fail "the initiator name is not $INITIATOR"
 docker volume create mpio-luns > /dev/null
@@ -78,7 +99,7 @@ for i in $(seq 1 60); do
 done
 
 echo "== list"
-out=$(sh "$SCRIPT" -p 127.0.0.1 -L)
+out=$("$SH" "$SCRIPT" -p 127.0.0.1 -L)
 echo "$out"
 echo "$out" | grep -q "^$IQN: not connected" || fail "list"
 
@@ -114,13 +135,30 @@ first=$(maps | sed -n 1p)
 sh -c 'exec 3< "$1"; exec sleep 60' holder "/dev/mapper/$first" &
 holder=$!
 sleep 1
-if sh "$SCRIPT" -t "$IQN" -D; then fail "disconnect did not refuse"; fi
+if "$SH" "$SCRIPT" -t "$IQN" -D; then fail "disconnect did not refuse"; fi
 [ "$(sessions)" = 2 ] || fail "sessions gone after the refusal"
 kill "$holder"
 wait "$holder" 2> /dev/null || true
 
-echo "== disconnect"
-disconnect_clean disconnect
+echo "== disconnect with -f while a device is in use"
+# shellcheck disable=SC2016
+sh -c 'exec 3< "$1"; exec sleep 60' holder "/dev/mapper/$first" &
+holder=$!
+sleep 1
+"$SH" "$SCRIPT" -t "$IQN" -D -f 2> /tmp/mpio.err || fail "disconnect -f"
+[ "$(sessions)" = 0 ] || fail "-f: sessions left"
+grep -q "/dev/mapper/$first" /tmp/mpio.err || fail "-f: no warning for the device in use"
+kill "$holder"
+wait "$holder" 2> /dev/null || true
+multipath -F > /dev/null 2>&1 || true
+[ -z "$(maps)" ] || fail "-f: multipath devices left after the holder ended: $(maps)"
+
+echo "== IPv6 portal"
+"$SH" "$SCRIPT" -t "$IQN" -p ::1 -n 2
+[ "$(sessions)" = 2 ] || fail "IPv6: not 2 sessions"
+iscsiadm -m session | grep -q '\[::1\]:3260' || fail "IPv6: sessions not over ::1"
+for m in $(maps); do [ "$(paths "$m")" = 2 ] || fail "IPv6: $m has not 2 paths"; done
+disconnect_clean ipv6
 
 echo "== round-robin"
 mpio -n 2 -s round-robin

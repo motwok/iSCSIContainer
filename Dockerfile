@@ -4,6 +4,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         python3 python3-rtslib-fb python3-yaml targetcli-fb kmod iproute2 \
     && rm -rf /var/lib/apt/lists/*
+COPY tools/targetcli-no-dbus.py /tmp/
+RUN python3 /tmp/targetcli-no-dbus.py && rm /tmp/targetcli-no-dbus.py
 COPY src/iscsicontainer /usr/lib/python3/dist-packages/iscsicontainer
 RUN printf '#!/usr/bin/python3\nfrom iscsicontainer.cli import entry\nentry()\n' \
         > /usr/local/bin/iscsictl \

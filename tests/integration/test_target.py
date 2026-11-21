@@ -3,6 +3,7 @@
 Needs a privileged container in the host network with /lib/modules, /sys/kernel/config and /dev
 of the host; started only with ISCSI_INTEGRATION=1.
 """
+import errno
 import json
 import os
 import re
@@ -240,6 +241,10 @@ def test_block_device_lun(start, image, tmp_path):
     try:
         start(one_target([{"lun": 3, "name": "it-block", "device": loop}]))
         assert health().returncode == 0, health().stdout
+        # The kernel holds an exported block device exclusively: no mount, no second backstore.
+        with pytest.raises(OSError) as busy:
+            os.close(os.open(loop, os.O_RDONLY | os.O_EXCL))
+        assert busy.value.errno == errno.EBUSY
         discover()
         (disk,) = login()
         data = write_and_read_back(disk, tmp_path)
@@ -251,6 +256,13 @@ def test_block_device_lun(start, image, tmp_path):
         adm("-m", "node", "--logoutall=all", check=False)
         time.sleep(1)
         sh("losetup", "-d", loop, check=False)
+
+
+def test_targetcli_shows_the_configuration(start, image):
+    start(one_target([{"lun": 0, "name": "it-cli", "file": image}]))
+    result = sh("targetcli", "ls")
+    assert TARGET in result.stdout and "it-cli" in result.stdout
+    assert "g-io-error" not in result.stdout + result.stderr
 
 
 def test_chap_and_mutual_chap(start, image):

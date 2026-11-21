@@ -115,6 +115,9 @@ jobs:
         run: docker build -f module/Dockerfile -t iscsicontainer-module:test .
       - name: Patch applies to the newest Debian kernel and the module builds
         run: docker run --rm iscsicontainer-module:test build-test
+      - name: Build for an old kernel through the snapshot archive
+        run: |
+          docker run --rm iscsicontainer-module:test build-test             --kernel "6.12.48+deb13-${{ matrix.arch }}" --version 6.12.48-1
 
   linux-script:
     name: Linux MPIO script (${{ matrix.arch }})
@@ -150,6 +153,8 @@ jobs:
         run: docker build -t iscsicontainer:test .
       - name: Script against the real target with dm-multipath
         run: sudo sh tests/linux/run.sh
+      - name: The same with bash and find_multipaths strict
+        run: sudo SH=bash MPIO_STRICT=1 sh tests/linux/run.sh
       - name: Kernel log
         if: failure()
         run: sudo dmesg | tail -60

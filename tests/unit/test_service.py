@@ -18,6 +18,8 @@ DEBIAN = ("Linux version 6.12.117+deb13-amd64 (debian-kernel@lists.debian.org) "
 OTHER = "Linux version 6.18.58.1-microsoft-standard-WSL2 (root@host) #1 SMP\n"
 SRC = "AAAA1111BBBB2222CCCC333"
 SNAPSHOT = {"fileinfo": {
+    "h0": [{"archive_name": "debian-security-debug", "first_seen": "20261101T000000Z",
+            "name": "a.dsc"}],
     "h1": [{"archive_name": "debian", "first_seen": "20261113T030000Z", "name": "a.dsc"}],
     "h2": [{"archive_name": "debian", "first_seen": "20261112T210000Z", "name": "b.tar.xz"}]}}
 
@@ -182,7 +184,9 @@ def test_fetch_source_from_the_snapshot_archive(world, capsys):
     lines = (world / "sources.list").read_text().splitlines()
     base = "[check-valid-until=no] https://snapshot.debian.org/archive/debian/20261112T210000Z/"
     assert lines == [f"deb {base} trixie main", f"deb-src {base} trixie main",
-                     f"deb {base} trixie-updates main", f"deb-src {base} trixie-updates main"]
+                     f"deb {base} trixie-updates main", f"deb-src {base} trixie-updates main",
+                     f"deb {base} trixie-proposed-updates main",
+                     f"deb-src {base} trixie-proposed-updates main"]
     assert run.commands[-1][:3] == ["apt-get", "-o", "Acquire::Check-Valid-Until=false"]
     assert "trying the snapshot archive" in capsys.readouterr().err
 
