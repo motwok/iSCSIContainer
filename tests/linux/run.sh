@@ -45,10 +45,17 @@ YAML
 sessions() {
     iscsiadm -m session 2> /dev/null | awk -v t="$IQN" '$4 == t' | wc -l | tr -d ' '
 }
+# Multipath maps in the device mapper, also those without any path left.
 maps() {
-    multipathd show maps format "%n %w" | awk 'NR > 1 { print $1 }' | while read -r m; do
-        multipath -ll "$m" | grep -q "LIO-ORG" && echo "$m"
-    done
+    dmsetup ls --target multipath | awk '$1 != "No" { print $1 }'
+}
+# Logs out with the script and checks that nothing is left and nothing was warned about.
+disconnect_clean() {
+    sh "$SCRIPT" -t "$IQN" -D 2> /tmp/mpio.err
+    cat /tmp/mpio.err
+    [ "$(sessions)" = 0 ] || fail "$1: sessions left"
+    [ -z "$(maps)" ] || fail "$1: multipath devices left: $(maps)"
+    if grep -q WARNING /tmp/mpio.err; then fail "$1: disconnect warned"; fi
 }
 paths() {
     multipath -ll "$1" | grep -c " sd[a-z]* "
@@ -113,14 +120,12 @@ kill "$holder"
 wait "$holder" 2> /dev/null || true
 
 echo "== disconnect"
-sh "$SCRIPT" -t "$IQN" -D
-[ "$(sessions)" = 0 ] || fail "sessions left"
-[ -z "$(maps)" ] || fail "multipath devices left"
+disconnect_clean disconnect
 
 echo "== round-robin"
 mpio -n 2 -s round-robin
 for m in $(maps); do multipath -ll "$m" | grep -q "policy='round-robin 0'" || fail "$m policy"; done
-sh "$SCRIPT" -t "$IQN" -D
+disconnect_clean round-robin
 
 echo "== CHAP"
 echo "$SECRET" | docker exec -i mpio-target iscsictl chap set "$IQN" "$INITIATOR" mpiouser
@@ -133,7 +138,7 @@ echo "== mutual CHAP"
 echo "$MUTUAL" | docker exec -i mpio-target iscsictl chap set-mutual "$IQN" "$INITIATOR" mpiotarget
 printf '%s\n%s\n' "$SECRET" "$MUTUAL" | mpio -r -n 2 -c mpiouser -m mpiotarget
 [ "$(sessions)" = 2 ] || fail "mutual CHAP: not 2 sessions"
-sh "$SCRIPT" -t "$IQN" -D
+disconnect_clean mutual-chap
 
 echo "== more than one session needs multipathd"
 systemctl stop multipathd.socket multipathd > /dev/null 2>&1 || true

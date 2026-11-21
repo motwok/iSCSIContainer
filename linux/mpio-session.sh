@@ -295,19 +295,22 @@ disconnect() {
             fi
         done
     fi
+    # Remove the maps while their paths are still there, then the paths: a map whose paths are
+    # gone stays behind. Once a map is removed the sessions are logged out in any case; several
+    # sessions with bare /dev/sdX paths and no multipath must not stay.
+    for name in $maps; do
+        multipathd disablequeueing map "$name" > /dev/null 2>&1 || true
+        if ! multipath -f "$name" > /dev/null 2>&1; then
+            echo "WARNING: /dev/mapper/$name could not be removed before the logout" >&2
+        fi
+    done
     for sid in $ids; do
         echo "Logging out session $sid"
         iscsiadm -m session -r "$sid" -u > /dev/null
     done
-    # multipathd removes a map once its last path is gone; flush only what is left after that.
     for name in $maps; do
-        i=0
-        while map_exists "$name" && [ "$i" -lt 15 ]; do
-            i=$((i + 1))
-            sleep 1
-        done
-        if map_exists "$name" && ! multipath -f "$name" > /dev/null 2>&1; then
-            echo "WARNING: /dev/mapper/$name could not be removed" >&2
+        if map_exists "$name"; then
+            multipath -f "$name" > /dev/null 2>&1 || echo "WARNING: /dev/mapper/$name is still there" >&2
         fi
     done
 }
