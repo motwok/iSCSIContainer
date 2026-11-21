@@ -117,7 +117,33 @@ jobs:
         run: docker run --rm iscsicontainer-module:test build-test
       - name: Build for an old kernel through the snapshot archive
         run: |
-          docker run --rm iscsicontainer-module:test build-test             --kernel "6.12.48+deb13-${{ matrix.arch }}" --version 6.12.48-1
+          docker run --rm iscsicontainer-module:test build-test \
+            --kernel "6.12.48+deb13-${{ matrix.arch }}" --version 6.12.48-1
+
+  # The runner's Ubuntu kernel cannot load a module built for Debian; a Debian VM can.
+  module-vm:
+    name: Module load in a Debian VM (amd64)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: KVM and qemu
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
+            sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo apt-get update -q
+          sudo apt-get install -y -q qemu-system-x86 qemu-utils cloud-image-utils
+          ls -l /dev/kvm
+      - name: Build images
+        run: |
+          docker build -t iscsicontainer:test .
+          docker build -f module/Dockerfile -t iscsicontainer-module:test .
+      - name: Module service builds, target loads the module, MC/S allowed
+        run: sh tests/vm/run.sh
+      - name: VM console
+        if: failure()
+        run: tail -60 /tmp/iscsi-vm/serial.log || true
 
   linux-script:
     name: Linux MPIO script (${{ matrix.arch }})
