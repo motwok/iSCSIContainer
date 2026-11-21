@@ -61,7 +61,8 @@ def boot_id():
 
 def debian_version(text):
     """The Debian package version in /proc/version, None on any other kernel."""
-    match = re.search(r"\bDebian (\d[0-9A-Za-z.+~:-]*)", text)
+    # After the build number; the compiler in front of it names a Debian version as well.
+    match = re.search(r"#\d+\s.*\bDebian (\d[0-9A-Za-z.+~:-]*)", text)
     return match.group(1) if match else None
 
 

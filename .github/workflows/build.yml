@@ -13,8 +13,8 @@ permissions:
   contents: read
 
 env:
-  TARGET_IMAGE: ghcr.io/motwok/iscsicontainer
-  MODULE_IMAGE: ghcr.io/motwok/iscsicontainer-module
+  TARGET_REPO: ghcr.io/motwok/iscsicontainer
+  MODULE_REPO: ghcr.io/motwok/iscsicontainer-module
 
 jobs:
   unit:
@@ -142,27 +142,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
 
-  images:
-    name: Images for both platforms
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
-      - name: Target image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: false
-      - name: Module image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: module/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: false
-
+  # Both images are built natively for both platforms in the integration jobs.
   # Releases are switched on with the repository variable RELEASE_ENABLED=true.
   release:
     name: Release images
@@ -172,7 +152,6 @@ jobs:
       - integration
       - module
       - coverage
-      - images
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -225,7 +204,7 @@ jobs:
           push: true
           provenance: false
           build-args: VERSION=${{ steps.drafter.outputs.resolved_version }}
-          tags: ${{ env.TARGET_IMAGE }}:${{ steps.drafter.outputs.resolved_version }}
+          tags: ${{ env.TARGET_REPO }}:${{ steps.drafter.outputs.resolved_version }}
       - name: Module image
         if: steps.changed.outputs.release == 'true'
         uses: docker/build-push-action@v7
@@ -236,7 +215,7 @@ jobs:
           push: true
           provenance: false
           build-args: VERSION=${{ steps.drafter.outputs.resolved_version }}
-          tags: ${{ env.MODULE_IMAGE }}:${{ steps.drafter.outputs.resolved_version }}
+          tags: ${{ env.MODULE_REPO }}:${{ steps.drafter.outputs.resolved_version }}
 
   # The pushed images, pulled from the registry, must start and work together.
   smoke:
@@ -272,8 +251,8 @@ jobs:
         env:
           V: ${{ needs.release.outputs.version }}
         run: |
-          [ "$(docker run --rm "$TARGET_IMAGE:$V" version)" = "$V" ]
-          TARGET_IMAGE="$TARGET_IMAGE:$V" MODULE_IMAGE="$MODULE_IMAGE:$V" sh tests/e2e/run.sh
+          [ "$(docker run --rm "$TARGET_REPO:$V" version)" = "$V" ]
+          TARGET_IMAGE="$TARGET_REPO:$V" MODULE_IMAGE="$MODULE_REPO:$V" sh tests/e2e/run.sh
 
   publish:
     name: Publish release
@@ -297,8 +276,8 @@ jobs:
         env:
           V: ${{ needs.release.outputs.version }}
         run: |
-          docker buildx imagetools create -t "$TARGET_IMAGE:latest" "$TARGET_IMAGE:$V"
-          docker buildx imagetools create -t "$MODULE_IMAGE:latest" "$MODULE_IMAGE:$V"
+          docker buildx imagetools create -t "$TARGET_REPO:latest" "$TARGET_REPO:$V"
+          docker buildx imagetools create -t "$MODULE_REPO:latest" "$MODULE_REPO:$V"
       - name: Publish release
         uses: release-drafter/release-drafter@v7
         with:

@@ -13,7 +13,8 @@ from .conftest import Runner, completed
 
 REL = os.uname().release
 DEBIAN = ("Linux version 6.12.117+deb13-amd64 (debian-kernel@lists.debian.org) "
-          "(x86_64-linux-gnu-gcc-14) #1 SMP PREEMPT_DYNAMIC Debian 6.12.117-1 (2026-11-12)\n")
+          "(x86_64-linux-gnu-gcc-14 (Debian 14.2.0-19) 14.2.0, GNU ld (GNU Binutils for Debian) "
+          "2.44) #1 SMP PREEMPT_DYNAMIC Debian 6.12.117-1 (2026-11-12)\n")
 OTHER = "Linux version 6.18.58.1-microsoft-standard-WSL2 (root@host) #1 SMP\n"
 SRC = "AAAA1111BBBB2222CCCC333"
 SNAPSHOT = {"fileinfo": {
