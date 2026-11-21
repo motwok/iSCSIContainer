@@ -102,9 +102,9 @@ mpio -n 2
 for m in $(maps); do [ "$(paths "$m")" = 2 ] || fail "$m has not 2 paths"; done
 
 echo "== disconnect refuses a device in use"
-first=$(maps | head -n 1)
+first=$(maps | sed -n 1p)
 # shellcheck disable=SC2016
-sh -c 'exec 3< "$1"; sleep 60' holder "/dev/mapper/$first" &
+sh -c 'exec 3< "$1"; exec sleep 60' holder "/dev/mapper/$first" &
 holder=$!
 sleep 1
 if sh "$SCRIPT" -t "$IQN" -D; then fail "disconnect did not refuse"; fi
