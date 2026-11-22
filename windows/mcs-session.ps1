@@ -5,11 +5,11 @@
   dialog.
 
 .DESCRIPTION
-  Uses the Microsoft iSCSI initiator (its WMI interface in root/wmi and the iSCSI cmdlets) and, on
-  Windows Server, MPIO. Run it in an elevated PowerShell.
+  Uses the Microsoft iSCSI initiator (its WMI interface in root/wmi and the iSCSI cmdlets) and,
+  where installed, MPIO. Run it in an elevated PowerShell.
 
-  Mode: MPIO exists only on Windows Server, with the feature Multipath-IO installed and iSCSI
-  disks claimed by the Microsoft DSM. -Mode Auto (default) uses MPIO when that is ready and MC/S
+  Mode: MPIO is ready when Multipath-IO is installed and the Microsoft DSM claims iSCSI disks,
+  whatever the Windows edition. -Mode Auto (default) uses MPIO when that is ready and MC/S
   otherwise. MC/S and MPIO are never mixed for one target; changing the mode needs -Reconnect.
 
   MC/S: without a session to the target it logs in; with one it adds or removes connections until
@@ -50,7 +50,8 @@
   the iSCSIContainer target (they report ALUA).
 
 .PARAMETER Mode
-  Auto (default): MPIO if it is ready on this Windows Server, else MC/S. Mcs or Mpio force one.
+  Auto (default): MPIO if it is ready, else MC/S. Mcs or Mpio force one; Mpio stops if MPIO is
+  not ready.
 
 .PARAMETER Reconnect
   Log out every session to the target first, then log in again (new source ports, so the
@@ -278,12 +279,9 @@ function Get-LbEntry($session) {
 
 # Why MPIO cannot be used here, or $null if it can.
 function Get-MpioProblem {
-    if ((Get-CimInstance Win32_OperatingSystem).ProductType -eq 1) {
-        return 'this is a client Windows; MPIO exists only on Windows Server'
-    }
-    $feature = Get-WindowsFeature -Name Multipath-IO -ErrorAction SilentlyContinue
-    if (-not $feature -or -not $feature.Installed) {
-        return 'the feature Multipath-IO is not installed (Install-WindowsFeature Multipath-IO, then restart)'
+    $dsm = Get-CimInstance Win32_SystemDriver -Filter "Name='msdsm'" -ErrorAction SilentlyContinue
+    if (-not $dsm -or -not (Get-Command Get-MSDSMAutomaticClaimSettings -ErrorAction SilentlyContinue)) {
+        return 'Multipath-IO is not installed (Windows Server: Install-WindowsFeature Multipath-IO, then restart)'
     }
     $claim = Get-MSDSMAutomaticClaimSettings -ErrorAction SilentlyContinue
     if (-not $claim -or -not $claim['iSCSI']) {
@@ -552,7 +550,7 @@ $use = switch ($Mode) {
     'Mcs' { 'Mcs' }
     default { if ($problem) { 'Mcs' } else { 'Mpio' } }
 }
-if ($Mode -eq 'Auto' -and $problem -and (Get-CimInstance Win32_OperatingSystem).ProductType -ne 1) {
+if ($Mode -eq 'Auto' -and $problem) {
     Write-Host "Using MC/S: $problem"
 }
 if ($use -eq 'Mpio' -and $Policy -ne 'LeastQueueDepth') {

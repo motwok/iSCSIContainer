@@ -76,15 +76,15 @@ powershell -ExecutionPolicy Bypass -File .\mcs-session.ps1 -Target <target-iqn> 
 
 It picks the mode itself (`-Mode Auto`):
 
-- **MPIO** on Windows Server with the feature Multipath-IO installed and iSCSI disks claimed by the
-  Microsoft DSM: one session per connection, 16 by default. A second session is only opened once
+- **MPIO** whenever Multipath-IO is installed and iSCSI disks are claimed by the Microsoft DSM,
+  whatever the Windows edition: one session per connection, 16 by default. A second session is only opened once
   every disk of the target is an MPIO disk; several sessions to a disk without MPIO destroy its
   data. Sessions with one connection each never trigger the MC/S teardown bug of the kernel, so
   MPIO can use several links also on hosts without the patched module.
-- **MC/S** otherwise (client Windows has no MPIO): one session with as many connections as the
+- **MC/S** otherwise: one session with as many connections as the
   target allows (`max_connections`).
 
-`-Mode Mcs` or `-Mode Mpio` forces one; the two are never mixed for a target, changing needs
+`-Mode Mcs` or `-Mode Mpio` forces one; `-Mode Mpio` stops if MPIO is not ready. The two are never mixed for a target, changing needs
 `-Reconnect`. The policy is "Least Queue Depth" in both modes.
 
 | Call | What it does |
