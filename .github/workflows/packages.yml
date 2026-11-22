@@ -47,5 +47,5 @@ jobs:
               --title "chore(deps): update image packages" --body "Installed package versions changed." \
               --label dependencies
           # Pushes and pull requests made with GITHUB_TOKEN start no workflow; a dispatch does.
+          # The merge job (dependabot-automerge.yml) merges it once green.
           gh workflow run build.yml --ref chore/image-packages
-          gh pr merge --auto --squash chore/image-packages

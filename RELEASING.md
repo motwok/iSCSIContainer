@@ -18,18 +18,19 @@ list for `linux/amd64` and `linux/arm64`; Docker picks the matching platform.
 
 | Workflow | File | Trigger | What it does |
 |---|---|---|---|
-| **Build** | `build.yml` | PR to `master`, push to `master`, manual | Builds both images for both platforms and runs the tests. On a push to `master` that changed an image, or when started by hand, it pushes `:X.Y.Z` of both, publishes the release `vX.Y.Z` and moves `:latest`. |
+| **Build** | `build.yml` | PR to `master`, push to `master`, manual | Builds both images for both platforms and runs the tests. On `master` (push or started by hand), when an image changed since the last release, it pushes `:X.Y.Z` of both, publishes the release `vX.Y.Z` and moves `:latest`. |
 | **Release Drafter** | `release-drafter.yml` | PR events | Labels pull requests from their Conventional Commit titles. The release notes are written by the release job in **Build**, only when there is a release. |
-| **Package update** | `packages.yml` | daily, manual | Builds both images, writes their installed package versions to `packages/` (one file per image) and opens a PR if they changed; it is merged automatically once the build is green. |
-| **Dependabot** | `.github/dependabot.yml` | Dependabot schedule | Opens PRs for the GitHub Actions used; they are merged automatically once the build is green. |
+| **Package update** | `packages.yml` | daily, manual | Builds both images, writes their installed package versions to `packages/` (one file per image) and opens a PR if they changed and starts **Build** on it. |
+| **Dependabot** | `.github/dependabot.yml` | Dependabot schedule | Opens PRs for the GitHub Actions used. |
+| **Merge green update PRs** | `dependabot-automerge.yml` | daily, manual | Merges the green Dependabot and package PRs, then starts **Build** on `master` (merges made by a workflow start no workflow themselves). |
 
 ## Release flow
 
 ```mermaid
 flowchart LR
   O[maintainer merges a PR] --> M[master]
-  D[Dependabot PR, auto-merged when green] --> M
-  U[daily package update PR, auto-merged when green] --> M
+  D[Dependabot PR, merged by a daily job when green] --> M
+  U[daily package update PR, merged by a daily job when green] --> M
   M --> C{image-relevant files<br/>changed since last release?}
   C -- "no (docs, CI, tests)" --> Q[no release,<br/>listed in the next one]
   C -- yes --> B[Build workflow<br/>image and tests]

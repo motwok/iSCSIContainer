@@ -246,7 +246,6 @@ jobs:
         id: changed
         run: |
           last=$(git describe --tags --abbrev=0 2>/dev/null || true)
-          if [ "${{ github.event_name }}" = workflow_dispatch ]; then echo "release=true" >> "$GITHUB_OUTPUT"; exit 0; fi
           if [ -z "$last" ] || ! git diff --quiet "$last" HEAD -- src patches packages Dockerfile module; then
             echo "release=true" >> "$GITHUB_OUTPUT"
           else
