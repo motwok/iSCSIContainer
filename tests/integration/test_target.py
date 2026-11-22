@@ -265,6 +265,22 @@ def test_targetcli_shows_the_configuration(start, image):
     assert "g-io-error" not in result.stdout + result.stderr
 
 
+def test_open_target(start, image, tmp_path):
+    start(one_target([{"lun": 0, "name": "it-open", "file": image}], acl="any", chap=False))
+    assert health().returncode == 0, health().stdout
+    assert read(f"{TPG}/attrib/generate_node_acls") == "1"
+    assert read(f"{TPG}/attrib/demo_mode_write_protect") == "0"
+    assert os.listdir(f"{TPG}/acls") == []
+    discover()
+    (disk,) = login()
+    write_and_read_back(disk, tmp_path)
+    text = metrics()
+    assert re.search(rf'iscsi_sessions\{{target="{re.escape(TARGET)}",initiator="iqn[^"]+"\}} 1',
+                     text)
+    assert re.search(r'iscsi_lun_written_bytes_total\{[^}]*initiator="\*"[^}]*\} [1-9]', text)
+    node("--logout")
+
+
 def test_chap_and_mutual_chap(start, image):
     target = start(one_target([{"lun": 0, "name": "it-chap", "file": image}]))
     discover()

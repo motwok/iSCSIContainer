@@ -87,6 +87,29 @@ def test_problems(configfs):
     ]
 
 
+def test_render_open_target(configfs):
+    current = state()
+    current["targets"][0].update(open=True, initiators=[])
+    tpg = configfs / T1 / "tpgt_1"
+    (tpg / "dynamic_sessions").write_text(f"{I1}\n{I1}\niqn.2026-11.test:other\n")
+    stats = tpg / "lun" / "lun_0" / "statistics" / "scsi_tgt_port"
+    stats.mkdir(parents=True)
+    (stats / "in_cmds").write_text("7\n")
+    (stats / "write_mbytes").write_text("2\n")
+    lines = metrics.render(current).splitlines()
+    for line in (
+            f'iscsi_sessions{{target="{T1}",initiator="{I1}"}} 2',
+            f'iscsi_sessions{{target="{T1}",initiator="iqn.2026-11.test:other"}} 1',
+            f'iscsi_lun_commands_total{{target="{T1}",initiator="*",lun="0",name="data"}} 7',
+            f'iscsi_lun_written_bytes_total{{target="{T1}",initiator="*",lun="0",name="data"}} '
+            "2097152"):
+        assert line in lines
+    assert not any(line.startswith("iscsi_lun_read_bytes_total") for line in lines)
+    (tpg / "dynamic_sessions").unlink()
+    assert not any(line.startswith("iscsi_sessions") for line in
+                   metrics.render(current).splitlines())
+
+
 def test_render(configfs):
     current = state()
     current["targets"].append({"iqn": T2, "ok": False, "error": "x", "initiators": [I1],

@@ -61,7 +61,7 @@ targets:
 | `parameters` | Further iSCSI parameters of the target, passed to the kernel as they are. `true` and `false` are written as `Yes` and `No`. |
 | `attributes` | Further attributes of the target, passed to the kernel as they are. `true` and `false` are written as `1` and `0`. |
 | `luns` | List of LUNs, required. |
-| `acl` | List of entries with `initiator`: the initiator names that may log in, required. Every initiator sees all LUNs of the target. |
+| `acl` | List of entries with `initiator`: the initiator names that may log in, required. Every initiator sees all LUNs of the target. `any` instead of the list lets every initiator log in and write, without CHAP (not with `chap: true`); logged as a warning. Metrics then show sessions per initiator and LUN counters for all initiators together (`initiator="*"`), no connections. |
 
 `MaxConnections`, `authentication` and `generate_node_acls` are managed by the container and cannot
 be set under `parameters` or `attributes`.

@@ -106,6 +106,21 @@ def test_build_everything(files, lio, store, logs):
     assert f"{I2} has no CHAP password" in out
 
 
+def test_open_target(files, lio, store, logs):
+    store.write(T1, I1, Cred("user", PW))
+    cfg = parse(lambda raw: raw["targets"][0].update(acl="any"))
+    one = build(lio, store, cfg)["targets"][0]
+    assert one["ok"] and one["open"] and one["initiators"] == []
+    tpg = lio.targets[T1]
+    assert tpg.acls == {}
+    assert {k: tpg.attributes[k] for k in ("generate_node_acls", "authentication",
+                                           "cache_dynamic_acls", "demo_mode_write_protect")}         == {"generate_node_acls": "1", "authentication": "0", "cache_dynamic_acls": "1",
+            "demo_mode_write_protect": "0"}
+    out = logs()
+    assert "acl any, every initiator may log in" in out and f"{T1} {I1} are unused" in out
+    assert "only the initiator name" not in out.split(T2)[0]
+
+
 def test_mcs_ignored(files, lio, store):
     state = build(lio, store, mcs=False, status="build-failed")
     assert not state["mcs_active"] and lio.targets[T1].parameters["MaxConnections"] == "1"

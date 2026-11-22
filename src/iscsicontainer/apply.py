@@ -146,13 +146,17 @@ def _portals(target, lio, tpg, entry, addresses):
 
 def _target(target, lio, store, mcs, addresses):
     entry = {"iqn": target.iqn, "ok": True, "error": None, "portals": [], "interfaces": [],
-             "luns": [], "initiators": list(target.acl)}
+             "luns": [], "initiators": list(target.acl), "open": target.open}
     storages = _luns(target, lio, entry)
     tpg = None
     try:
         tpg = lio.target(target.iqn)
         needed = chap.required(target, store)
-        _set(lio, lio.set_attribute, tpg, "attribute", "generate_node_acls", "0")
+        _set(lio, lio.set_attribute, tpg, "attribute", "generate_node_acls",
+             "1" if target.open else "0")
+        if target.open:
+            _set(lio, lio.set_attribute, tpg, "attribute", "cache_dynamic_acls", "1")
+            _set(lio, lio.set_attribute, tpg, "attribute", "demo_mode_write_protect", "0")
         _set(lio, lio.set_attribute, tpg, "attribute", "authentication", "1" if needed else "0")
         connections = target.max_connections if mcs else 1
         _set(lio, lio.set_parameter, tpg, "parameter", "MaxConnections", str(connections))
@@ -185,7 +189,10 @@ def build(cfg, lio, store, mod, addresses=net.interface_addresses):
     state = {"mcs_requested": cfg.wants_mcs, "mcs_active": mod.mcs, "module_status": mod.status,
              "targets": []}
     for target in cfg.targets:
-        if len(target.acl) > 1:
+        if target.open:
+            log.warning(f"{target.iqn}: acl any, every initiator may log in and write; "
+                        "two at a time without MPIO or a cluster file system destroy data")
+        elif len(target.acl) > 1:
             log.warning(f"{target.iqn}: several initiators see the same LUNs; "
                         "without a cluster file system that destroys data")
         state["targets"].append(_target(target, lio, store, mod.mcs, addresses))
