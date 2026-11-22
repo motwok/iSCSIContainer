@@ -9,6 +9,8 @@ LOGIN_FAILURES = ("authenticate", "authorize", "negotiate", "other")
 LUN_STATS = (("iscsi_lun_commands_total", "num_cmds", 1),
              ("iscsi_lun_read_bytes_total", "read_mbytes", 1048576),
              ("iscsi_lun_written_bytes_total", "write_mbytes", 1048576))
+OPEN_LUN_STATS = (("iscsi_lun_commands_total", "in_cmds", 1),
+                  *LUN_STATS[1:])
 HELP = {
     "iscsi_target_up": "1 if the target is exported",
     "iscsi_lun_up": "1 if the LUN is exported",
@@ -69,6 +71,8 @@ def _kernel(lines, target):
                                      reason + "_fails"))
         if value is not None:
             lines.add("iscsi_login_failures_total", value, target=iqn, reason=reason)
+    if target.get("open"):
+        _open(lines, target, os.path.join(base, "tpgt_1"))
     for initiator in target["initiators"]:
         acl = os.path.join(base, "tpgt_1", "acls", initiator)
         info = _read(os.path.join(acl, "info"))
@@ -84,6 +88,21 @@ def _kernel(lines, target):
                 if value is not None:
                     lines.add(name, value * factor, target=iqn, initiator=initiator,
                               lun=lun["lun"], name=lun["name"])
+
+
+def _open(lines, target, tpg):
+    # Dynamic ACLs are not in configfs: sessions by name, LUN counters for all initiators.
+    names = (_read(os.path.join(tpg, "dynamic_sessions")) or "").split()
+    for initiator in sorted(set(names)):
+        lines.add("iscsi_sessions", names.count(initiator), target=target["iqn"],
+                  initiator=initiator)
+    for lun in target["luns"]:
+        stats = os.path.join(tpg, "lun", f"lun_{lun['lun']}", "statistics", "scsi_tgt_port")
+        for name, attribute, factor in OPEN_LUN_STATS:
+            value = _number(os.path.join(stats, attribute))
+            if value is not None:
+                lines.add(name, value * factor, target=target["iqn"], initiator="*",
+                          lun=lun["lun"], name=lun["name"])
 
 
 def render(state):

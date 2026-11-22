@@ -70,6 +70,14 @@ def test_required(store):
     assert chap.required(_target(), store) and not chap.required(_target(False), store)
 
 
+def test_open_target_needs_no_chap(store, logs):
+    target = parse(lambda raw: raw["targets"][0].update(acl="any")).targets[0]
+    store.write(T1, I1, Cred("user", PW))
+    assert not chap.required(target, store)
+    chap.report(target, store)
+    assert logs() == ""
+
+
 def test_apply_acl(store, lio, logs):
     tpg = lio.target(T1)
     acl = lio.acl(tpg, I1)

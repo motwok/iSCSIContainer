@@ -45,6 +45,7 @@ class Target:
     attributes: tuple
     luns: tuple
     acl: tuple
+    open: bool = False
 
 
 @dataclass(frozen=True)
@@ -182,7 +183,10 @@ def _target(raw, where):
     if len(set(numbers)) != len(numbers):
         raise ConfigError(f"{where}.luns: duplicate LUN number")
     acl = []
-    for i, item in enumerate(_list(raw["acl"], f"{where}.acl")):
+    is_open = raw["acl"] == "any"
+    if is_open and chap is True:
+        raise ConfigError(f"{where}: acl any cannot be combined with chap true")
+    for i, item in enumerate([] if is_open else _list(raw["acl"], f"{where}.acl")):
         _mapping(item, f"{where}.acl[{i}]", ("initiator",), ("initiator",))
         acl.append(_name(item["initiator"], f"{where}.acl[{i}].initiator"))
     if len(set(acl)) != len(acl):
@@ -197,7 +201,7 @@ def _target(raw, where):
                              MANAGED_PARAMETERS, "Yes", "No"),
         attributes=_free_map(raw.get("attributes", {}), f"{where}.attributes",
                              MANAGED_ATTRIBUTES, "1", "0"),
-        luns=luns, acl=tuple(acl))
+        luns=luns, acl=tuple(acl), open=is_open)
 
 
 def parse(text):

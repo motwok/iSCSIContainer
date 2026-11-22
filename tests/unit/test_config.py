@@ -37,6 +37,16 @@ def test_optional_sections():
     assert cfg.targets[0].chap is True and not cfg.wants_mcs
 
 
+def test_acl_any():
+    def change(raw):
+        raw["targets"][0]["acl"] = "any"
+        raw["targets"][1]["chap"] = False
+        raw["targets"][1]["acl"] = "any"
+    one, two = parse(change).targets
+    assert one.open and one.acl == () and one.chap is None
+    assert two.open and two.chap is False and not parse().targets[0].open
+
+
 @pytest.mark.parametrize("value,seconds", [(30, 30), ("45s", 45), ("1h", 3600)])
 def test_wait(value, seconds):
     assert parse(lambda raw: raw.update(module={"wait": value})).module_wait == seconds
@@ -99,6 +109,8 @@ def _drop(*path):
     _t("acl", [{"initiator": "nobody"}]),
     _t("acl", [{"name": I1}]),
     _t("acl", [{"initiator": I1}, {"initiator": I1}]),
+    _t("acl", "all"),
+    lambda raw: raw["targets"][0].update(acl="any", chap=True),
     _l("lun", 256),
     _l("lun", "0"),
     _l("name", "bad name"),

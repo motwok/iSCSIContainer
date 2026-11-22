@@ -106,6 +106,8 @@ class Store:
 def required(target, store):
     if target.chap is not None:
         return target.chap
+    if target.open:
+        return False
     return any(store.status(target.iqn, i) != "none" for i in target.acl)
 
 
@@ -122,6 +124,8 @@ def apply_acl(lio, acl, store, target, initiator):
 
 
 def report(target, store):
+    if target.open:
+        return
     states = {i: store.status(target.iqn, i) for i in target.acl}
     with_password = [i for i, s in states.items() if s != "none"]
     if target.chap is False:
