@@ -6,19 +6,18 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
+  actions: write
 
 jobs:
   packages:
     name: Record the image packages
     runs-on: ubuntu-24.04
     env:
-      # Fine-grained personal token; a pull request opened with GITHUB_TOKEN would not start Build.
-      GH_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          token: ${{ secrets.PACKAGES_TOKEN || github.token }}
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
       - name: Build both images and list their packages
@@ -35,7 +34,7 @@ jobs:
             git diff --stat -- packages
           fi
       - name: Pull request
-        if: steps.diff.outputs.changed == 'true' && env.GH_TOKEN != ''
+        if: steps.diff.outputs.changed == 'true'
         run: |
           git config user.name "Emmo Emminghaus"
           git config user.email "${{ vars.PACKAGES_EMAIL || 'motwok@users.noreply.github.com' }}"
@@ -47,7 +46,6 @@ jobs:
             gh pr create --base master --head chore/image-packages \
               --title "chore(deps): update image packages" --body "Installed package versions changed." \
               --label dependencies
+          # Pushes and pull requests made with GITHUB_TOKEN start no workflow; a dispatch does.
+          gh workflow run build.yml --ref chore/image-packages
           gh pr merge --auto --squash chore/image-packages
-      - name: No token
-        if: steps.diff.outputs.changed == 'true' && env.GH_TOKEN == ''
-        run: echo "Packages changed, but the secret PACKAGES_TOKEN is not set; no pull request." >> "$GITHUB_STEP_SUMMARY"

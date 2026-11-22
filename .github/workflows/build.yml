@@ -78,6 +78,7 @@ jobs:
           echo "InitiatorName=iqn.2026-11.test.integration:init" | sudo tee /etc/iscsi/initiatorname.iscsi
           sudo systemctl restart iscsid
       - name: Integration tests with the real kernel target and open-iscsi
+        timeout-minutes: 10
         run: |
           mkdir -p cover
           docker run --rm --privileged --network host --pid host \
@@ -85,10 +86,10 @@ jobs:
             -v "$PWD/cover:/cover" -e ISCSI_INTEGRATION=1 -e ISCSI_HOST_INITIATOR=1 \
             -e COVERAGE_FILE=/cover/.coverage.integration-${{ matrix.arch }} \
             -e COVERAGE_PROCESS_START=/work/pyproject.toml \
-            iscsicontainer:unit python3 -m pytest tests/integration -q -p no:cacheprovider -rs \
+            iscsicontainer:unit python3 -m pytest tests/integration -v -p no:cacheprovider -rs \
             --cov=iscsicontainer --cov=iscsimodule --cov-report= --cov-fail-under=0
       - name: Kernel log
-        if: failure()
+        if: failure() || cancelled()
         run: sudo dmesg | tail -60
       - uses: actions/upload-artifact@v7
         if: always()
@@ -221,7 +222,7 @@ jobs:
   # Releases are switched on with the repository variable RELEASE_ENABLED=true.
   release:
     name: Release images
-    if: github.event_name != 'pull_request' && vars.RELEASE_ENABLED == 'true'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master' && vars.RELEASE_ENABLED == 'true'
     needs:
       - unit
       - integration
