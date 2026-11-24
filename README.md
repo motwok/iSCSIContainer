@@ -7,6 +7,8 @@
 [![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fmotwok%2FiSCSIContainer%2Fmaster%2Fpyproject.toml)](pyproject.toml)
 [![Platforms](https://img.shields.io/badge/platform-linux%2Famd64%20%7C%20linux%2Farm64-blue)](https://github.com/motwok/iSCSIContainer/pkgs/container/iscsicontainer)
 [![Image](https://img.shields.io/badge/image-ghcr.io%2Fmotwok%2Fiscsicontainer-blue?logo=docker&logoColor=white)](https://github.com/motwok/iSCSIContainer/pkgs/container/iscsicontainer)
+[![Use case](https://img.shields.io/badge/use%20case-Docker%20host%20as%20iSCSI%20SAN-informational)](#how-it-works)
+[![Clients](https://img.shields.io/badge/clients-Windows%20%7C%20Linux%2C%20MC%2FS%20%7C%20MPIO-informational)](#windows-initiator-with-mcs-or-mpio)
 [![Support Me](https://img.shields.io/badge/Ko--fi-Support%20Me-ff5e5b?logo=ko-fi&logoColor=white)](https://ko-fi.com/motwok)
 
 An iSCSI target in a Docker container, configured by one YAML document in the stack.
