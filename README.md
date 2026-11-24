@@ -1,3 +1,5 @@
+<img src="docs/images/logo.svg" width="112" align="right" alt="iSCSIContainer logo">
+
 # iSCSIContainer
 
 [![Build](https://github.com/motwok/iSCSIContainer/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/motwok/iSCSIContainer/actions/workflows/build.yml)
