@@ -1,6 +1,4 @@
-<img src="docs/images/logo.svg" width="112" align="right" alt="iSCSIContainer logo">
-
-# iSCSIContainer
+# iSCSIContainer <img src="docs/images/logo.svg" height="40" align="right" alt="iSCSIContainer logo">
 
 [![Build](https://github.com/motwok/iSCSIContainer/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/motwok/iSCSIContainer/actions/workflows/build.yml)
 [![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmotwok%2FiSCSIContainer%2Fbadges%2Fcoverage.json)](https://github.com/motwok/iSCSIContainer/actions/workflows/build.yml)
