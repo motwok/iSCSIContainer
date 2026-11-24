@@ -59,6 +59,18 @@ sessions() {
 maps() {
     dmsetup ls --target multipath | awk '$1 != "No" { print $1 }'
 }
+# Removes maps left without paths. Such a map can stay open for a moment (queued I/O, e.g. a udev
+# probe); queued I/O is failed first, then the flush is retried.
+flush_maps() {
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        [ -n "$(maps)" ] || return 0
+        for m in $(maps); do dmsetup message "$m" 0 fail_if_no_path > /dev/null 2>&1 || true; done
+        udevadm settle
+        multipath -F > /dev/null 2>&1 || true
+        [ -n "$(maps)" ] || return 0
+        sleep 1
+    done
+}
 # Logs out with the script and checks that nothing is left and nothing was warned about.
 disconnect_clean() {
     "$SH" "$SCRIPT" -t "$IQN" -D 2> /tmp/mpio.err
@@ -150,7 +162,7 @@ sleep 1
 grep -q "/dev/mapper/$first" /tmp/mpio.err || fail "-f: no warning for the device in use"
 kill "$holder"
 wait "$holder" 2> /dev/null || true
-multipath -F > /dev/null 2>&1 || true
+flush_maps
 [ -z "$(maps)" ] || fail "-f: multipath devices left after the holder ended: $(maps)"
 
 echo "== partitioned LUN"
