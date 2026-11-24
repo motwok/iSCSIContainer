@@ -1,5 +1,14 @@
 # iSCSIContainer
 
+[![Build](https://github.com/motwok/iSCSIContainer/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/motwok/iSCSIContainer/actions/workflows/build.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmotwok%2FiSCSIContainer%2Fbadges%2Fcoverage.json)](https://github.com/motwok/iSCSIContainer/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/motwok/iSCSIContainer)](https://github.com/motwok/iSCSIContainer/releases/latest)
+[![License](https://img.shields.io/github/license/motwok/iSCSIContainer)](LICENSE)
+[![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fmotwok%2FiSCSIContainer%2Fmaster%2Fpyproject.toml)](pyproject.toml)
+[![Platforms](https://img.shields.io/badge/platform-linux%2Famd64%20%7C%20linux%2Farm64-blue)](https://github.com/motwok/iSCSIContainer/pkgs/container/iscsicontainer)
+[![Image](https://img.shields.io/badge/image-ghcr.io%2Fmotwok%2Fiscsicontainer-blue?logo=docker&logoColor=white)](https://github.com/motwok/iSCSIContainer/pkgs/container/iscsicontainer)
+[![Support Me](https://img.shields.io/badge/Ko--fi-Support%20Me-ff5e5b?logo=ko-fi&logoColor=white)](https://ko-fi.com/motwok)
+
 An iSCSI target in a Docker container, configured by one YAML document in the stack.
 It drives the Linux kernel target (LIO) of the Docker host. Optionally it allows MC/S (Multiple
 Connections per Session), so a single LUN can use more than one network link; by default each session
