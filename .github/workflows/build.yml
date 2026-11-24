@@ -217,6 +217,38 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
+      - name: Badge
+        run: |
+          total=$(awk '$1 == "TOTAL" { print $NF }' report.txt | tr -d '%')
+          # Only reached at >= 99 %.
+          printf '{"schemaVersion":1,"label":"coverage","message":"%s%%","color":"brightgreen"}\n' "$total" > coverage.json
+          cat coverage.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-badge
+          path: coverage.json
+
+  # Shields.io endpoint JSON on the orphan branch badges, one commit, overwritten on each master run.
+  badge:
+    name: Coverage badge
+    needs: coverage
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: coverage-badge
+      - name: Push to branch badges
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git init -q -b badges
+          git add coverage.json
+          git -c user.name="Emmo Emminghaus" -c user.email="${{ vars.PACKAGES_EMAIL || 'motwok@users.noreply.github.com' }}" \
+            commit -q -m "chore: coverage badge"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}" badges
 
   # Both images are built natively for both platforms in the integration jobs.
   # Releases are switched on with the repository variable RELEASE_ENABLED=true.
