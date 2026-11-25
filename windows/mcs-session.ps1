@@ -332,7 +332,9 @@ function Show-State {
     $sessions = @(Get-Sessions $Target)
     if (-not $sessions) { Write-Host "No session to $Target."; return }
     $disks = @(Get-TargetDisks)
-    if (@($disks | Where-Object { Test-MpioDisk $_ })) {
+    # A session with several connections is MC/S, even on a disk the DSM claimed.
+    $mcs = @($sessions | Where-Object { @($_.ConnectionInformation).Count -gt 1 })
+    if (-not $mcs -and @($disks | Where-Object { Test-MpioDisk $_ })) {
         Write-Host ('{0}: {1} session(s) with MPIO' -f $Target, $sessions.Count)
         foreach ($disk in $disks) {
             $entry = Get-MpioEntry $disk

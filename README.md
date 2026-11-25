@@ -16,8 +16,6 @@ It drives the Linux kernel target (LIO) of the Docker host. Optionally it allows
 Connections per Session), so a single LUN can use more than one network link; by default each session
 has a single connection.
 
-> **Status:** in development. There is no release yet.
-
 ## How it works
 
 ```mermaid
