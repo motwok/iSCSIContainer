@@ -52,8 +52,10 @@ jobs:
           sha=$(git rev-parse HEAD)
           ids=
           for _ in $(seq 30); do
-            ids=$(gh run list --commit "$sha" --event pull_request --json databaseId,conclusion \
-              --jq '.[] | select(.conclusion == "action_required") | .databaseId')
+            # Filtered run queries omit runs waiting for approval, so filter here.
+            ids=$(gh api "repos/${{ github.repository }}/actions/workflows/build.yml/runs?per_page=20" \
+              --jq ".workflow_runs[] | select(.head_sha == \"$sha\" and .event == \"pull_request\"
+                and .conclusion == \"action_required\") | .id")
             [ -z "$ids" ] || break
             sleep 10
           done
